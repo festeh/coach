@@ -1,0 +1,31 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ main ]  # Adjust this to your main branch name if different
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.17  # Adjust this to your Go version
+
+    - name: Build
+      run: go build -o coach .
+
+    - name: Deploy to VPS
+      env:
+        HOST: ${{ secrets.HOST }}
+        SSH_KEY: ${{ secrets.SSH_KEY }}
+      run: |
+        mkdir -p ~/.ssh
+        echo "$SSH_KEY" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        scp -o StrictHostKeyChecking=no coach root@$HOST:/root/coach
+        ssh -o StrictHostKeyChecking=no root@$HOST 'chmod +x /root/coach'
