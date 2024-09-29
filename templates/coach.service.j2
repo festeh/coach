@@ -3,12 +3,12 @@ Description=Coach Go Server
 After=network.target
 
 [Service]
-ExecStart=/root/coach/coach
+ExecStart=/root/coach_main/coach
 Restart=always
 User=root
 Group=root
 Environment=PATH=/usr/bin:/usr/local/bin
-WorkingDirectory=/root/coach
+WorkingDirectory=/root/coach_main
 
 [Install]
 WantedBy=multi-user.target

@@ -3,11 +3,6 @@
   hosts: all
   become: yes
   tasks:
-    - name: Copy Coach binary
-      copy:
-        src: /path/to/your/coach/binary
-        dest: /root/coach/coach
-        mode: '0755'
 
     - name: Create systemd service file
       template:
