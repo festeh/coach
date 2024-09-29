@@ -1,0 +1,28 @@
+---
+- name: Deploy Coach Service
+  hosts: all
+  become: yes
+  tasks:
+    - name: Copy Coach binary
+      copy:
+        src: /path/to/your/coach/binary
+        dest: /root/coach/coach
+        mode: '0755'
+
+    - name: Create systemd service file
+      template:
+        src: coach.service.j2
+        dest: /etc/systemd/system/coach.service
+      notify:
+        - Reload systemd
+
+    - name: Ensure Coach service is running
+      systemd:
+        name: coach
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
