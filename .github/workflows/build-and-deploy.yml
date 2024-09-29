@@ -27,5 +27,6 @@ jobs:
         mkdir -p ~/.ssh
         echo "$SSH_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
+        ssh -o StrictHostKeyChecking=no root@$HOST 'mkdir -p /root/coach'
         scp -o StrictHostKeyChecking=no coach root@$HOST:/root/coach
         ssh -o StrictHostKeyChecking=no root@$HOST 'chmod +x /root/coach'
