@@ -20,7 +20,13 @@ jobs:
       run: go build -o coach .
 
     - name: Create coach_main directory
-      
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.HOST }}
+        username: root
+        key: ${{ secrets.SSH_KEY }}
+        script: |
+          mkdir -p /root/coach_main
 
     - name: Copy file via SCP
       uses: appleboy/scp-action@master
