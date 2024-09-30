@@ -45,3 +45,17 @@ jobs:
         key: ${{ secrets.SSH_KEY }}
         script: |
           chmod +x /root/coach_main/coach
+          
+    - name: Check and reload coach service
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.HOST }}
+        username: root
+        key: ${{ secrets.SSH_KEY }}
+        script: |
+          if systemctl is-enabled coach.service; then
+            systemctl reload coach.service || systemctl restart coach.service
+            echo "Coach service reloaded/restarted successfully"
+          else
+            echo "Coach service is not enabled"
+          fi
