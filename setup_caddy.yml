@@ -3,11 +3,6 @@
   hosts: all
   become: yes
   tasks:
-    - name: Install Caddy
-      ansible.builtin.apt:
-        name: caddy
-        state: present
-        update_cache: yes
 
     - name: Create Caddyfile
       ansible.builtin.copy:
@@ -19,9 +14,3 @@
         owner: root
         group: root
         mode: '0644'
-
-    - name: Ensure Caddy service is running and enabled
-      ansible.builtin.systemd:
-        name: caddy
-        state: restarted
-        enabled: yes
