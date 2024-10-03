@@ -20,8 +20,8 @@ func (s *State) Load() error {
 	defer s.mu.Unlock()
 
 	if _, err := os.Stat(stateFile); os.IsNotExist(err) {
-		s.SetFocusing(false)
-		return s.Save()
+		s.isFocusing = false
+		return s.save()
 	}
 
 	data, err := os.ReadFile(stateFile)
@@ -32,16 +32,20 @@ func (s *State) Load() error {
 	return json.Unmarshal(data, s)
 }
 
-func (s *State) Save() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+// save is an internal method that saves the state without acquiring the mutex
+func (s *State) save() error {
 	data, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
 
 	return os.WriteFile(stateFile, data, 0644)
+}
+
+func (s *State) Save() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.save()
 }
 
 func (s *State) SetFocusing(focusing bool) error {
