@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 
 	"github.com/gorilla/websocket"
 )
@@ -14,6 +16,11 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 }
+
+var (
+	clients    = make(map[*websocket.Conn]bool)
+	clientsMux sync.Mutex
+)
 
 func main() {
 	err := state.Load()
@@ -34,7 +41,17 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		return
 	}
-	defer conn.Close()
+
+	clientsMux.Lock()
+	clients[conn] = true
+	clientsMux.Unlock()
+
+	defer func() {
+		conn.Close()
+		clientsMux.Lock()
+		delete(clients, conn)
+		clientsMux.Unlock()
+	}()
 
 	for {
 		messageType, p, err := conn.ReadMessage()
@@ -49,6 +66,33 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func broadcastFocusState(focusing bool) {
+	message := struct {
+		Event string `json:"event"`
+		Focus bool   `json:"focus"`
+	}{
+		Event: "focus",
+		Focus: focusing,
+	}
+
+	jsonMessage, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("Error marshaling focus state: %v", err)
+		return
+	}
+
+	clientsMux.Lock()
+	for client := range clients {
+		err := client.WriteMessage(websocket.TextMessage, jsonMessage)
+		if err != nil {
+			log.Printf("Error sending message to client: %v", err)
+			client.Close()
+			delete(clients, client)
+		}
+	}
+	clientsMux.Unlock()
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +129,9 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to set focus state", http.StatusInternalServerError)
 		return
 	}
+
+	// Broadcast the new focus state to all connected clients
+	go broadcastFocusState(focus)
 
 	w.WriteHeader(http.StatusOK)
 	if focus {
