@@ -65,18 +65,42 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 
 	for {
 		messageType, p, err := conn.ReadMessage()
+		fmt.Println(messageType, string(p), err)
 		if err != nil {
 			log.Println(err)
 			return
 		}
 		if string(p) == "get_quote" {
-			quote := quoteStore.GetQuote()
-			if err := conn.WriteMessage(messageType, []byte(quote.Text)); err != nil {
-				log.Println(err)
-				return
-			}
+      broadcastQuote()
 		}
 	}
+}
+
+func broadcastQuote() {
+  message := struct {
+    Event string `json:"event"`
+    Quote string `json:"quote"`
+  }{
+    Event: "quote",
+    Quote: quoteStore.GetQuote().Text,
+  }
+
+  jsonMessage, err := json.Marshal(message)
+  if err != nil {
+    log.Printf("Error marshaling quote: %v", err)
+    return
+  }
+
+  clientsMux.Lock()
+  for client := range clients {
+    err := client.WriteMessage(websocket.TextMessage, jsonMessage)
+    if err != nil {
+      log.Printf("Error sending message to client: %v", err)
+      client.Close()
+      delete(clients, client)
+    }
+  }
+  clientsMux.Unlock()
 }
 
 func broadcastFocusState(focusing bool) {
