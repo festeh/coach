@@ -44,7 +44,7 @@ jobs:
         username: root
         key: ${{ secrets.SSH_KEY }}
         source: "assets/quotes.txt"
-        target: "/root/coach_main/assets"
+        target: "/root/coach_main"
 
     - name: Execute remote commands
       uses: appleboy/ssh-action@master
