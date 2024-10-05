@@ -15,17 +15,26 @@ const port = ":8080"
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
 }
 
 var (
 	clients    = make(map[*websocket.Conn]bool)
 	clientsMux sync.Mutex
+	quoteStore QuoteStore
 )
 
 func main() {
 	err := state.Load()
 	if err != nil {
 		log.Fatalf("Failed to load state: %v", err)
+	}
+
+	err = quoteStore.Load()
+	if err != nil {
+		log.Fatalf("Failed to load quotes: %v", err)
 	}
 
 	http.HandleFunc("/health", healthHandler)
@@ -36,6 +45,7 @@ func main() {
 }
 
 func websocketHandler(w http.ResponseWriter, r *http.Request) {
+	log.Println("Client connected")
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
@@ -59,8 +69,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println(err)
 			return
 		}
-		if string(p) == "ping" {
-			if err := conn.WriteMessage(messageType, []byte("pong")); err != nil {
+		if string(p) == "get_quote" {
+			quote := quoteStore.GetQuote()
+			if err := conn.WriteMessage(messageType, []byte(quote.Text)); err != nil {
 				log.Println(err)
 				return
 			}
