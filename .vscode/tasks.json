@@ -1,24 +1,21 @@
 {
-    "version": "2.0.0",
-    "tasks": [
-        {
-            "label": "build",
-            "type": "shell",
-            "command": "go",
-            "args": [
-                "build",
-                "."
-            ],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
-            "presentation": {
-                "reveal": "always"
-            },
-            "problemMatcher": [
-                "$go"
-            ]
-        }
-    ]
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "type": "shell",
+      "command": "go",
+      "args": [
+        "build",
+        "."
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [
+        "$go"
+      ]
+    }
+  ]
 }
