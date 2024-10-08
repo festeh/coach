@@ -1,17 +1,13 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"sync"
-
-	"github.com/gorilla/websocket"
 )
 
 const port = ":8080"
-
 
 var (
 	clientsMux sync.Mutex
@@ -36,36 +32,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(port, nil))
 }
 
-
-func broadcastFocusState(focusing bool) {
-	message := struct {
-		Event string `json:"event"`
-		Focus bool   `json:"focus"`
-	}{
-		Event: "focus",
-		Focus: focusing,
-	}
-
-	jsonMessage, err := json.Marshal(message)
-	if err != nil {
-		log.Printf("Error marshaling focus state: %v", err)
-		return
-	}
-
-	clientsMux.Lock()
-	for client := range clients {
-		err := client.WriteMessage(websocket.TextMessage, jsonMessage)
-		if err != nil {
-			log.Printf("Error sending message to client: %v", err)
-			client.Close()
-			delete(clients, client)
-		}
-	}
-	clientsMux.Unlock()
-}
-
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Healthy"))
 }
-
