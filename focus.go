@@ -59,7 +59,7 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 	// If focusing is true, start a goroutine to set focus to false after the specified duration
 	if isFocusing {
 		go func() {
-			time.Sleep(time.Duration(durationInt))
+			time.Sleep(time.Duration(durationInt) * time.Second)
 			err := state.SetFocusing(false)
 			if err != nil {
 				log.Printf("Error setting focus to false after duration: %v", err)
