@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 type InternalState struct {
@@ -61,9 +64,9 @@ func (s *State) FocusedAt() time.Time {
 }
 
 func (s *State) Save() error {
-  s.mu.Lock()
-  defer s.mu.Unlock()
-  return s.save()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.save()
 }
 
 var state = &State{}
@@ -87,6 +90,7 @@ func (s *State) Load() error {
 
 // save is an internal method that saves the state without acquiring the mutex
 const stateFile = "state.json"
+
 func (s *State) save() error {
 	data, err := json.Marshal(&s.internal)
 	if err != nil {
@@ -123,4 +127,3 @@ func (s *State) BroadcastToClients(message []byte) {
 		}
 	}
 }
-
