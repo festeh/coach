@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -56,6 +57,18 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Broadcast the new focus state to all connected clients
 	go broadcastFocusState()
+
+	// If focusing is true, start a goroutine to set focus to false after the specified duration
+	if isFocusing {
+		go func() {
+			time.Sleep(time.Duration(durationInt) * time.Minute)
+			err := state.SetFocusing(false)
+			if err != nil {
+				log.Printf("Error setting focus to false after duration: %v", err)
+			}
+			go broadcastFocusState()
+		}()
+	}
 
 	w.WriteHeader(http.StatusOK)
 	if isFocusing {
