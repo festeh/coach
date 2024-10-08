@@ -4,10 +4,15 @@ import (
 	"encoding/json"
 	"os"
 	"sync"
+  "time"
 )
 
 type State struct {
 	isFocusing bool `json:"is_focusing"`
+  // last time the focus has occured
+  focusedAt time.Time `json:"focused_at"`
+  // duration in seconds
+  duration int `json:"duration"`
 	mu         sync.Mutex
 }
 
