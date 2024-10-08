@@ -17,6 +17,7 @@ type InternalState struct {
 
 type State struct {
 	internal InternalState
+	clients  map[*websocket.Conn]bool
 	mu       sync.Mutex
 }
 
@@ -93,5 +94,33 @@ func (s *State) save() error {
 	}
 
 	return os.WriteFile(stateFile, data, 0644)
+}
+
+func (s *State) AddClient(client *websocket.Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.clients == nil {
+		s.clients = make(map[*websocket.Conn]bool)
+	}
+	s.clients[client] = true
+}
+
+func (s *State) RemoveClient(client *websocket.Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.clients, client)
+}
+
+func (s *State) BroadcastToClients(message []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for client := range s.clients {
+		err := client.WriteMessage(websocket.TextMessage, message)
+		if err != nil {
+			log.Printf("Error sending message to client: %v", err)
+			client.Close()
+			delete(s.clients, client)
+		}
+	}
 }
 

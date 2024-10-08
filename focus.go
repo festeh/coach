@@ -93,14 +93,5 @@ func broadcastFocusState() {
 		return
 	}
 
-	clientsMux.Lock()
-	for client := range clients {
-		err := client.WriteMessage(websocket.TextMessage, jsonMessage)
-		if err != nil {
-			log.Printf("Error sending message to client: %v", err)
-			client.Close()
-			delete(clients, client)
-		}
-	}
-	clientsMux.Unlock()
+	state.BroadcastToClients(jsonMessage)
 }
