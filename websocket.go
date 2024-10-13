@@ -42,6 +42,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 		if string(p) == "get_quote" {
 			broadcastQuote()
 		}
+		if string(p) == "get_focus" {
+			broadcastFocusState()
+		}
 	}
 }
 
