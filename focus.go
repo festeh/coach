@@ -9,6 +9,7 @@ import (
 )
 
 func focusHandler(w http.ResponseWriter, r *http.Request) {
+  log.Println("Got a request to /focus")
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -32,6 +33,7 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	isFocusing := r.FormValue("focus") == "true"
+  log.Println("isFocusing: ", isFocusing)
 	err = state.SetFocusing(isFocusing)
 	if err != nil {
 		http.Error(w, "Failed to set focus state", http.StatusInternalServerError)
@@ -42,6 +44,7 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 	if duration == "" {
 		duration = "30"
 	}
+  log.Println("duration: ", duration)
 	durationInt, err := strconv.Atoi(duration)
 	if err != nil {
 		http.Error(w, "Failed to parse duration", http.StatusBadRequest)
