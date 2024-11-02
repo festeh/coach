@@ -9,7 +9,7 @@ import (
 )
 
 func focusHandler(w http.ResponseWriter, r *http.Request) {
-  log.Println("Got a request to /focus")
+	log.Println("Got a request to /focus")
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -17,11 +17,17 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodGet {
 		w.WriteHeader(http.StatusOK)
-		if state.IsFocusing() {
-			w.Write([]byte("Focusing"))
-		} else {
-			w.Write([]byte("Not focusing"))
+		message := struct {
+			Focusing bool `json:"focusing"`
+		}{
+			Focusing: state.IsFocusing(),
 		}
+		jsonMessage, err := json.Marshal(message)
+		if err != nil {
+			log.Printf("Error marshaling focus state: %v", err)
+			return
+		}
+		w.Write(jsonMessage)
 		return
 	}
 
@@ -32,9 +38,9 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isFocusing := r.FormValue("focus") == "true"
-  log.Println("isFocusing: ", isFocusing)
-	err = state.SetFocusing(isFocusing)
+	focusing := r.FormValue("focusing") == "true"
+	log.Println("focusing: ", focusing)
+	err = state.SetFocusing(focusing)
 	if err != nil {
 		http.Error(w, "Failed to set focus state", http.StatusInternalServerError)
 		return
@@ -44,7 +50,7 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 	if duration == "" {
 		duration = "30"
 	}
-  log.Println("duration: ", duration)
+	log.Println("duration: ", duration)
 	durationInt, err := strconv.Atoi(duration)
 	if err != nil {
 		http.Error(w, "Failed to parse duration", http.StatusBadRequest)
@@ -60,7 +66,7 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 	go broadcastFocusState()
 
 	// If focusing is true, start a goroutine to set focus to false after the specified duration
-	if isFocusing {
+	if focusing {
 		go func() {
 			time.Sleep(time.Duration(durationInt) * time.Second)
 			err := state.SetFocusing(false)
@@ -73,7 +79,7 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	if isFocusing {
+	if focusing {
 		w.Write([]byte("Now focusing"))
 	} else {
 		w.Write([]byte("No longer focusing"))
