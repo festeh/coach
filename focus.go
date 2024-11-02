@@ -9,7 +9,7 @@ import (
 )
 
 func focusHandler(w http.ResponseWriter, r *http.Request) {
-	log.Println("Got a request to /focus")
+	log.Println("Got a request to /focusing")
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -20,7 +20,7 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 		message := struct {
 			Focusing bool `json:"focusing"`
 		}{
-			Focusing: state.IsFocusing(),
+			Focusing: state.Focusing(),
 		}
 		jsonMessage, err := json.Marshal(message)
 		if err != nil {
@@ -88,11 +88,11 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 
 func broadcastFocusState() {
 	message := struct {
-		Event string `json:"event"`
-		Focus bool   `json:"focus"`
+		Event    string `json:"event"`
+		Focusing bool   `json:"focusing"`
 	}{
-		Event: "focus",
-		Focus: state.IsFocusing(),
+		Event:    "focusing",
+		Focusing: state.Focusing(),
 	}
 
 	jsonMessage, err := json.Marshal(message)

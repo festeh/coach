@@ -31,7 +31,7 @@ func (s *State) SetFocusing(focusing bool) error {
 	return s.Save()
 }
 
-func (s *State) IsFocusing() bool {
+func (s *State) Focusing() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.internal.IsFocusing

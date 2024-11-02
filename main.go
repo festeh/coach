@@ -26,7 +26,7 @@ func main() {
 	}
 
 	http.HandleFunc("/health", healthHandler)
-	http.HandleFunc("/focus", focusHandler)
+	http.HandleFunc("/focusing", focusHandler)
 	http.HandleFunc("/connect", websocketHandler)
 	fmt.Printf("Server starting on port %s\n", port)
 	log.Fatal(http.ListenAndServe(port, nil))
