@@ -44,6 +44,12 @@ func main() {
 	log.Fatal(http.ListenAndServe(port, nil))
 }
 
+// @Summary Health check endpoint
+// @Description Returns the health status of the API
+// @Tags health
+// @Produce plain
+// @Success 200 {string} string "Healthy"
+// @Router /health [get]
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Healthy"))

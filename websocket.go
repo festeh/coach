@@ -17,6 +17,14 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// @Summary WebSocket connection endpoint
+// @Description Establishes a WebSocket connection for real-time updates
+// @Tags websocket
+// @Accept json
+// @Produce json
+// @Success 101 {string} string "Switching Protocols to WebSocket"
+// @Failure 400 {string} string "Bad Request"
+// @Router /connect [get]
 func websocketHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("Client connected")
 	conn, err := upgrader.Upgrade(w, r, nil)

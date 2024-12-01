@@ -8,6 +8,18 @@ import (
 	"time"
 )
 
+// @Summary Get or set focus state
+// @Description Get the current focus state or set a new focus state with duration
+// @Tags focus
+// @Accept x-www-form-urlencoded
+// @Produce json
+// @Param focusing formData bool false "Set focus state to true/false"
+// @Param duration formData int false "Duration in seconds for focus period (default 30)"
+// @Success 200 {object} map[string]interface{} "Returns focus state"
+// @Failure 400 {string} string "Bad request"
+// @Failure 405 {string} string "Method not allowed"
+// @Failure 500 {string} string "Internal server error"
+// @Router /focusing [get,post]
 func focusHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("Got a request to /focusing")
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
