@@ -19,7 +19,8 @@ import (
 // @Failure 400 {string} string "Bad request"
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {string} string "Internal server error"
-// @Router /focusing [get,post]
+// @Router /focusing [get]
+// @Router /focusing [post]
 func focusHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("Got a request to /focusing")
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
