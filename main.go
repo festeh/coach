@@ -37,8 +37,8 @@ func main() {
 	http.HandleFunc("/health", healthHandler)
 	http.HandleFunc("/focusing", focusHandler)
 	http.HandleFunc("/connect", websocketHandler)
-	http.HandleFunc("/swagger/*", httpSwagger.Handler(
-		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
+	http.Handle("/swagger/", httpSwagger.Handler(
+		httpSwagger.URL("/swagger/doc.json"),
 	))
 	fmt.Printf("Server starting on port %s\n", port)
 	log.Fatal(http.ListenAndServe(port, nil))
