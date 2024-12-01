@@ -1,0 +1,114 @@
+basePath: /
+host: localhost:8080
+info:
+  contact: {}
+  description: API for the coaching and focus management service
+  title: Coach API
+  version: "1.0"
+paths:
+  /connect:
+    get:
+      consumes:
+      - application/json
+      description: Establishes a WebSocket connection for real-time updates
+      produces:
+      - application/json
+      responses:
+        "101":
+          description: Switching Protocols to WebSocket
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            type: string
+      summary: WebSocket connection endpoint
+      tags:
+      - websocket
+  /focusing:
+    get:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Get the current focus state or set a new focus state with duration
+      parameters:
+      - description: Set focus state to true/false
+        in: formData
+        name: focusing
+        type: boolean
+      - description: Duration in seconds for focus period (default 30)
+        in: formData
+        name: duration
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns focus state
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad request
+          schema:
+            type: string
+        "405":
+          description: Method not allowed
+          schema:
+            type: string
+        "500":
+          description: Internal server error
+          schema:
+            type: string
+      summary: Get or set focus state
+      tags:
+      - focus
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Get the current focus state or set a new focus state with duration
+      parameters:
+      - description: Set focus state to true/false
+        in: formData
+        name: focusing
+        type: boolean
+      - description: Duration in seconds for focus period (default 30)
+        in: formData
+        name: duration
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns focus state
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad request
+          schema:
+            type: string
+        "405":
+          description: Method not allowed
+          schema:
+            type: string
+        "500":
+          description: Internal server error
+          schema:
+            type: string
+      summary: Get or set focus state
+      tags:
+      - focus
+  /health:
+    get:
+      description: Returns the health status of the API
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: Healthy
+          schema:
+            type: string
+      summary: Health check endpoint
+      tags:
+      - health
+swagger: "2.0"
