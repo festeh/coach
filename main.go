@@ -5,7 +5,16 @@ import (
 	"log"
 	"net/http"
 	"sync"
+
+	_ "coach/docs"
+	httpSwagger "github.com/swaggo/http-swagger"
 )
+
+// @title           Coach API
+// @version         1.0
+// @description     API for the coaching and focus management service
+// @host            localhost:8080
+// @BasePath        /
 
 const port = ":8080"
 
@@ -28,6 +37,9 @@ func main() {
 	http.HandleFunc("/health", healthHandler)
 	http.HandleFunc("/focusing", focusHandler)
 	http.HandleFunc("/connect", websocketHandler)
+	http.HandleFunc("/swagger/*", httpSwagger.Handler(
+		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
+	))
 	fmt.Printf("Server starting on port %s\n", port)
 	log.Fatal(http.ListenAndServe(port, nil))
 }
