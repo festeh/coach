@@ -1,19 +1,20 @@
 package main
 
 import (
-	"fmt"
-	"log"
 	"net/http"
 	"sync"
+	"time"
+
+	"github.com/charmbracelet/log"
 
 	_ "coach/docs"
+
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 // @title           Coach API
 // @version         1.0
 // @description     API for the coaching and focus management service
-// @host            localhost:8080
 // @BasePath        /
 
 const port = ":8080"
@@ -24,6 +25,8 @@ var (
 )
 
 func main() {
+	log.SetTimeFormat(time.Stamp)
+  log.SetReportCaller(true)
 	err := state.Load()
 	if err != nil {
 		log.Fatalf("Failed to load state: %v", err)
@@ -40,7 +43,7 @@ func main() {
 	http.Handle("/swagger/", httpSwagger.Handler(
 		httpSwagger.URL("/swagger/doc.json"),
 	))
-	fmt.Printf("Server starting on port %s\n", port)
+	log.Info("Server starting on", "port", port)
 	log.Fatal(http.ListenAndServe(port, nil))
 }
 

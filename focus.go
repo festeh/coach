@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"log"
+	"github.com/charmbracelet/log"
 	"net/http"
 	"strconv"
 	"time"
@@ -22,7 +22,7 @@ import (
 // @Router /focusing [get]
 // @Router /focusing [post]
 func focusHandler(w http.ResponseWriter, r *http.Request) {
-	log.Println("Got a request to /focusing")
+	log.Info("Focusing", "method", r.Method)
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -52,7 +52,7 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	focusing := r.FormValue("focusing") == "true"
-	log.Println("focusing: ", focusing)
+	log.Info("", "focusing", focusing)
 	err = state.SetFocusing(focusing)
 	if err != nil {
 		http.Error(w, "Failed to set focus state", http.StatusInternalServerError)
@@ -63,7 +63,7 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 	if duration == "" {
 		duration = "30"
 	}
-	log.Println("duration: ", duration)
+	log.Info("", "duration", duration)
 	durationInt, err := strconv.Atoi(duration)
 	if err != nil {
 		http.Error(w, "Failed to parse duration", http.StatusBadRequest)
@@ -86,7 +86,7 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				log.Printf("Error setting focus to false after duration: %v", err)
 			}
-			log.Println("Setting focus to false after " + duration + " seconds")
+			log.Info("Resetting focus after [duration] seconds", "duration", duration)
 			go broadcastFocusState()
 		}()
 	}

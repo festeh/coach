@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"log"
+  "github.com/charmbracelet/log"
 	"os"
 	"sync"
 	"time"
@@ -116,12 +116,14 @@ func (s *State) RemoveClient(client *websocket.Conn) {
 }
 
 func (s *State) BroadcastToClients(message []byte) {
+  log.Info("Start broadcast")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for client := range s.clients {
 		err := client.WriteMessage(websocket.TextMessage, message)
+    log.Info("Send message", "msg", string(message), "to", client.RemoteAddr())
 		if err != nil {
-			log.Printf("Error sending message to client: %v", err)
+			log.Error("Error sending message to client", "err", err)
 			client.Close()
 			delete(s.clients, client)
 		}
