@@ -69,11 +69,6 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to parse duration", http.StatusBadRequest)
 		return
 	}
-	err = state.SetDuration(durationInt)
-	if err != nil {
-		http.Error(w, "Failed to set duration", http.StatusInternalServerError)
-		return
-	}
 
 	// Broadcast the new focus state to all connected clients
 	go broadcastFocusState()

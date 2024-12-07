@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-  "github.com/charmbracelet/log"
+	"github.com/charmbracelet/log"
 	"os"
 	"sync"
 	"time"
@@ -12,10 +12,10 @@ import (
 
 type InternalState struct {
 	IsFocusing bool `json:"is_focusing"`
-	// last time the focus has occured
-	FocusedAt time.Time `json:"focused_at"`
-	// duration in seconds
-	Duration int `json:"duration"`
+	// last time the focusing was changed
+	LastChange time.Time `json:"changed_at"`
+	// If IsFocusing=true shows remaining time
+	FocusTimeLeft time.Duration `json:"left"`
 }
 
 type State struct {
@@ -24,8 +24,6 @@ type State struct {
 	mu       sync.Mutex
 }
 
-// BroadcastFocusStateEveryMinute starts a goroutine that broadcasts 
-// the focus state to all clients every minute
 func (s *State) BroadcastFocusStateEveryMinute() {
 	ticker := time.NewTicker(1 * time.Minute)
 	go func() {
@@ -48,38 +46,11 @@ func (s *State) Focusing() bool {
 	return s.internal.IsFocusing
 }
 
-func (s *State) SetDuration(duration int) error {
-	s.mu.Lock()
-	s.internal.Duration = duration
-	s.mu.Unlock()
-	return s.Save()
-}
-
-func (s *State) Duration() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.internal.Duration
-}
-
-func (s *State) SetFocusedAt(focusedAt time.Time) error {
-	s.mu.Lock()
-	s.internal.FocusedAt = focusedAt
-	s.mu.Unlock()
-	return s.Save()
-}
-
-func (s *State) FocusedAt() time.Time {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.internal.FocusedAt
-}
-
 func (s *State) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.save()
 }
-
 
 func (s *State) Load() error {
 	s.mu.Lock()
@@ -126,12 +97,12 @@ func (s *State) RemoveClient(client *websocket.Conn) {
 }
 
 func (s *State) BroadcastToClients(message []byte) {
-  log.Info("Start broadcast")
+	log.Info("Start broadcast")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for client := range s.clients {
 		err := client.WriteMessage(websocket.TextMessage, message)
-    log.Info("Send message", "msg", string(message), "to", client.RemoteAddr())
+		log.Info("Send message", "msg", string(message), "to", client.RemoteAddr())
 		if err != nil {
 			log.Error("Error sending message to client", "err", err)
 			client.Close()
