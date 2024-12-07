@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
+  "github.com/charmbracelet/log"
 
 	"github.com/gorilla/websocket"
 )
@@ -26,10 +26,10 @@ var upgrader = websocket.Upgrader{
 // @Failure 400 {string} string "Bad Request"
 // @Router /connect [get]
 func websocketHandler(w http.ResponseWriter, r *http.Request) {
-	log.Println("Client connected")
+	log.Info("Client connected")
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println(err)
+		log.Error(err)
 		return
 	}
 
@@ -44,7 +44,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 		messageType, p, err := conn.ReadMessage()
 		fmt.Println(messageType, string(p), err)
 		if err != nil {
-			log.Println(err)
+			log.Error(err)
 			return
 		}
 		if string(p) == "get_quote" {
