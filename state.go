@@ -24,6 +24,8 @@ type State struct {
 	mu       sync.Mutex
 }
 
+// Add a method to State that would broadcast focus state each minute AI!
+
 func (s *State) SetFocusing(focusing bool) error {
 	s.mu.Lock()
 	s.internal.IsFocusing = focusing
@@ -69,7 +71,6 @@ func (s *State) Save() error {
 	return s.save()
 }
 
-var state = &State{}
 
 func (s *State) Load() error {
 	s.mu.Lock()

@@ -24,6 +24,8 @@ var (
 	quoteStore QuoteStore
 )
 
+var state = &State{}
+
 func main() {
 	log.SetTimeFormat(time.Stamp)
   log.SetReportCaller(true)
