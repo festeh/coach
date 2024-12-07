@@ -24,7 +24,16 @@ type State struct {
 	mu       sync.Mutex
 }
 
-// Add a method to State that would broadcast focus state each minute AI!
+// BroadcastFocusStateEveryMinute starts a goroutine that broadcasts 
+// the focus state to all clients every minute
+func (s *State) BroadcastFocusStateEveryMinute() {
+	ticker := time.NewTicker(1 * time.Minute)
+	go func() {
+		for range ticker.C {
+			broadcastFocusState()
+		}
+	}()
+}
 
 func (s *State) SetFocusing(focusing bool) error {
 	s.mu.Lock()

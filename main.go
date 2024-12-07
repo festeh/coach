@@ -39,6 +39,8 @@ func main() {
 		log.Fatalf("Failed to load quotes: %v", err)
 	}
 
+	state.BroadcastFocusStateEveryMinute()
+
 	http.HandleFunc("/health", healthHandler)
 	http.HandleFunc("/focusing", focusHandler)
 	http.HandleFunc("/connect", websocketHandler)
