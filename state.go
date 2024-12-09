@@ -14,14 +14,36 @@ type InternalState struct {
 	IsFocusing bool `json:"is_focusing"`
 	// last time the focusing was changed
 	LastChange time.Time `json:"changed_at"`
-	// If IsFocusing=true shows remaining time
-	FocusTimeLeft time.Duration `json:"left"`
+	// duration of the focus time left
+	Duration time.Duration `json:"duration"`
 }
 
 type State struct {
 	internal InternalState
 	clients  map[*websocket.Conn]bool
 	mu       sync.Mutex
+}
+
+type FocusInfo struct {
+	Focusing        bool          `json:"focusing"`
+	SinceLastChange time.Duration `json:"since_last_change"`
+	FocusTimeLeft   time.Duration `json:"focus_time_left"`
+}
+
+func GetFocusInfo(s *InternalState) FocusInfo {
+	focusTimeLeft := time.Duration(0)
+	sinceLastChange := time.Since(s.LastChange)
+	if s.IsFocusing {
+		focusTimeLeft = s.Duration - sinceLastChange
+	}
+	if focusTimeLeft < 0 {
+		focusTimeLeft = time.Duration(0)
+	}
+	return FocusInfo{
+		Focusing:        s.IsFocusing,
+		SinceLastChange: sinceLastChange / time.Second,
+		FocusTimeLeft:   focusTimeLeft / time.Second,
+	}
 }
 
 func (s *State) BroadcastFocusStateEveryMinute() {
@@ -33,11 +55,19 @@ func (s *State) BroadcastFocusStateEveryMinute() {
 	}()
 }
 
-func (s *State) SetFocusing(focusing bool) error {
+func (s *State) SetFocusing(duration time.Duration) {
 	s.mu.Lock()
-	s.internal.IsFocusing = focusing
-	s.mu.Unlock()
-	return s.Save()
+	defer s.mu.Unlock()
+	s.internal.IsFocusing = true
+	s.internal.Duration = duration
+	s.internal.LastChange = time.Now()
+}
+
+func (s *State) SetUnfocusing() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.internal.IsFocusing = false
+	s.internal.LastChange = time.Now()
 }
 
 func (s *State) Focusing() bool {
@@ -66,6 +96,7 @@ func (s *State) Load() error {
 		return err
 	}
 
+	s.internal.LastChange = time.Now()
 	return json.Unmarshal(data, &s.internal)
 }
 

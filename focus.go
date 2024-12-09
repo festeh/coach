@@ -30,11 +30,7 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodGet {
 		w.WriteHeader(http.StatusOK)
-		message := struct {
-			Focusing bool `json:"focusing"`
-		}{
-			Focusing: state.Focusing(),
-		}
+		message := GetFocusInfo(&state.internal)
 		jsonMessage, err := json.Marshal(message)
 		if err != nil {
 			log.Printf("Error marshaling focus state: %v", err)
@@ -53,11 +49,6 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 
 	focusing := r.FormValue("focusing") == "true"
 	log.Info("", "focusing", focusing)
-	err = state.SetFocusing(focusing)
-	if err != nil {
-		http.Error(w, "Failed to set focus state", http.StatusInternalServerError)
-		return
-	}
 
 	duration := r.FormValue("duration")
 	if duration == "" {
@@ -69,6 +60,12 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to parse duration", http.StatusBadRequest)
 		return
 	}
+	focusDuration := time.Duration(durationInt) * time.Second
+	if focusing {
+		state.SetFocusing(focusDuration)
+	} else {
+		state.SetUnfocusing()
+	}
 
 	// Broadcast the new focus state to all connected clients
 	go broadcastFocusState()
@@ -77,32 +74,24 @@ func focusHandler(w http.ResponseWriter, r *http.Request) {
 	if focusing {
 		go func() {
 			time.Sleep(time.Duration(durationInt) * time.Second)
-			err := state.SetFocusing(false)
-			if err != nil {
-				log.Printf("Error setting focus to false after duration: %v", err)
-			}
+			state.SetUnfocusing()
 			log.Info("Resetting focus after [duration] seconds", "duration", duration)
 			go broadcastFocusState()
 		}()
 	}
 
 	w.WriteHeader(http.StatusOK)
-	if focusing {
-		w.Write([]byte("Now focusing"))
-	} else {
-		w.Write([]byte("No longer focusing"))
+	message := GetFocusInfo(&state.internal)
+	jsonMessage, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("Error marshaling focus state: %v", err)
+		return
 	}
+	w.Write(jsonMessage)
 }
 
 func broadcastFocusState() {
-	message := struct {
-		Event    string `json:"event"`
-		Focusing bool   `json:"focusing"`
-	}{
-		Event:    "focusing",
-		Focusing: state.Focusing(),
-	}
-
+	message := GetFocusInfo(&state.internal)
 	jsonMessage, err := json.Marshal(message)
 	if err != nil {
 		log.Printf("Error marshaling focus state: %v", err)
