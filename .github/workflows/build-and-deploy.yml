@@ -7,7 +7,7 @@ on:
 env:
   GO_VERSION: 1.23.1
   APP_NAME: coach
-  PATH: /opt/coach
+  DEPLOY_PATH: /opt/coach
 
 jobs:
   build-and-deploy:
@@ -30,8 +30,8 @@ jobs:
         username: root
         key: ${{ secrets.SSH_KEY }}
         script: |
-          mkdir -p {{ env.PATH }}
-          mkdir -p {{ env.PATH }}/assets
+          mkdir -p {{ env.DEPLOY_PATH }}
+          mkdir -p {{ env.DEPLOY_PATH }}/assets
 
     - name: Copy executable
       uses: appleboy/scp-action@master
@@ -40,7 +40,7 @@ jobs:
         username: root
         key: ${{ secrets.SSH_KEY }}
         source: "coach"
-        target: ${{ env.PATH }}
+        target: ${{ env.DEPLOY_PATH }}
 
     - name: Copy quotes
       uses: appleboy/scp-action@master
@@ -49,7 +49,7 @@ jobs:
         username: root
         key: ${{ secrets.SSH_KEY }}
         source: "assets/quotes.txt"
-        target: ${{ env.PATH }}  
+        target: ${{ env.DEPLOY_PATH }}  
 
     - name: Execute remote commands
       uses: appleboy/ssh-action@master
