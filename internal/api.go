@@ -16,7 +16,7 @@ import (
 // @Produce plain
 // @Success 200 {string} string "Healthy"
 // @Router /health [get]
-func HealthHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HealthHandler(w http.ResponseWriter, r *http.Request) {
   w.WriteHeader(http.StatusOK)
   w.Write([]byte("Healthy"))
 }
@@ -34,7 +34,7 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Internal server error"
 // @Router /focusing [get]
 // @Router /focusing [post]
-func FocusHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) FocusHandler(w http.ResponseWriter, r *http.Request) {
   log.Info("Focusing", "method", r.Method)
   if r.Method != http.MethodGet && r.Method != http.MethodPost {
     http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -43,7 +43,7 @@ func FocusHandler(w http.ResponseWriter, r *http.Request) {
 
   if r.Method == http.MethodGet {
     w.WriteHeader(http.StatusOK)
-    message := GetFocusInfo(&state.internal)
+    message := GetFocusInfo(&s.State.internal)
     jsonMessage, err := json.Marshal(message)
     if err != nil {
       log.Printf("Error marshaling focus state: %v", err)
@@ -75,26 +75,26 @@ func FocusHandler(w http.ResponseWriter, r *http.Request) {
   }
   focusDuration := time.Duration(durationInt) * time.Second
   if focusing {
-    state.SetFocusing(focusDuration)
+    s.State.SetFocusing(focusDuration)
   } else {
-    state.SetUnfocusing()
+    s.State.SetUnfocusing()
   }
 
   // Broadcast the new focus state to all connected clients
-  go broadcastFocusState()
+  go s.BroadcastFocusState()
 
   // If focusing is true, start a goroutine to set focus to false after the specified duration
   if focusing {
     go func() {
       time.Sleep(time.Duration(durationInt) * time.Second)
-      state.SetUnfocusing()
+      s.State.SetUnfocusing()
       log.Info("Resetting focus after [duration] seconds", "duration", duration)
-      go broadcastFocusState()
+      go s.BroadcastFocusState()
     }()
   }
 
   w.WriteHeader(http.StatusOK)
-  message := GetFocusInfo(&state.internal)
+  message := GetFocusInfo(&s.State.internal)
   jsonMessage, err := json.Marshal(message)
   if err != nil {
     log.Printf("Error marshaling focus state: %v", err)
@@ -111,19 +111,19 @@ func FocusHandler(w http.ResponseWriter, r *http.Request) {
 // @Success 101 {string} string "Switching Protocols to WebSocket"
 // @Failure 400 {string} string "Bad Request"
 // @Router /connect [get]
-func WebsocketHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
   log.Info("Client connected")
-  conn, err := upgrader.Upgrade(w, r, nil)
+  conn, err := s.upgrader.Upgrade(w, r, nil)
   if err != nil {
     log.Error(err)
     return
   }
 
-  state.AddClient(conn)
+  s.State.AddClient(conn)
 
   defer func() {
     conn.Close()
-    state.RemoveClient(conn)
+    s.State.RemoveClient(conn)
   }()
 
   for {
@@ -134,10 +134,10 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request) {
       return
     }
     if string(p) == "get_quote" {
-      broadcastQuote()
+      s.BroadcastQuote()
     }
     if string(p) == "get_focusing" {
-      broadcastFocusState()
+      s.BroadcastFocusState()
     }
   }
 }

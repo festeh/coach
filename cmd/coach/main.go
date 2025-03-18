@@ -2,13 +2,12 @@ package main
 
 import (
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/charmbracelet/log"
 
 	_ "coach/docs"
-  "coach/internal"
+	"coach/internal"
 
 	httpSwagger "github.com/swaggo/http-swagger"
 )
@@ -20,32 +19,25 @@ import (
 
 const port = ":8080"
 
-var (
-	clientsMux sync.Mutex
-	quoteStore coach.QuoteStore
-)
-
-var state = &coach.State{}
-
 func main() {
 	log.SetTimeFormat(time.Stamp)
-  log.SetReportCaller(true)
-	err := state.Load()
+	log.SetReportCaller(true)
+
+	// Create and initialize the server
+	server, err := coach.NewServer()
 	if err != nil {
-		log.Fatalf("Failed to load state: %v", err)
+		log.Fatalf("Failed to initialize server: %v", err)
 	}
 
-	err = quoteStore.Load()
-	if err != nil {
-		log.Fatalf("Failed to load quotes: %v", err)
-	}
+	// Set up routes
+	mux := server.SetupRoutes()
 
-	http.HandleFunc("/health", coach.HealthHandler)
-	http.HandleFunc("/focusing", coach.FocusHandler)
-	http.HandleFunc("/connect", coach.WebsocketHandler)
+	// Add swagger handler
+	http.Handle("/", mux)
 	http.Handle("/swagger/", httpSwagger.Handler(
 		httpSwagger.URL("/swagger/doc.json"),
 	))
+
 	log.Info("Server starting on", "port", port)
 	log.Fatal(http.ListenAndServe(port, nil))
 }
