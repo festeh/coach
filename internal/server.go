@@ -51,7 +51,7 @@ func (s *Server) SetupRoutes() http.Handler {
 
 // BroadcastFocusState sends the current focus state to all connected clients
 func (s *Server) BroadcastFocusState() {
-	message := GetFocusInfo(&s.State.internal)
+	message := s.State.GetCurrentFocusInfo()
 	s.State.BroadcastToClients(message)
 }
 

@@ -62,6 +62,41 @@ func (s *State) SetUnfocusing() {
 	s.internal.LastChange = time.Now()
 }
 
+// HandleFocusChange processes a focus state change request
+// It returns the updated focus info and schedules auto-reset if needed
+func (s *State) HandleFocusChange(focusing bool, durationSeconds int) FocusInfo {
+	focusDuration := time.Duration(durationSeconds) * time.Second
+	
+	if focusing {
+		s.SetFocusing(focusDuration)
+	} else {
+		s.SetUnfocusing()
+	}
+	
+	// Get the updated focus info
+	s.mu.Lock()
+	info := GetFocusInfo(&s.internal)
+	s.mu.Unlock()
+	
+	return info
+}
+
+// ScheduleFocusReset schedules the focus state to reset after the specified duration
+func (s *State) ScheduleFocusReset(durationSeconds int) {
+	go func() {
+		time.Sleep(time.Duration(durationSeconds) * time.Second)
+		s.SetUnfocusing()
+		log.Info("Resetting focus after duration", "duration", durationSeconds)
+	}()
+}
+
+// GetCurrentFocusInfo returns the current focus state information
+func (s *State) GetCurrentFocusInfo() FocusInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return GetFocusInfo(&s.internal)
+}
+
 func (s *State) Focusing() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

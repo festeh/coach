@@ -41,20 +41,20 @@ func (s *Server) FocusHandler(w http.ResponseWriter, r *http.Request) {
     return
   }
 
+  // GET method - return current focus state
   if r.Method == http.MethodGet {
-    message := GetFocusInfo(&s.State.internal)
+    message := s.State.GetCurrentFocusInfo()
     jsonMessage, err := json.Marshal(message)
     if err != nil {
-      log.Printf("Error marshaling focus state: %v", err)
+      log.Error("Error marshaling focus state", "err", err)
       w.WriteHeader(http.StatusInternalServerError)
       return
     }
     w.Write(jsonMessage)
-    w.WriteHeader(http.StatusOK)
     return
   }
 
-  // POST method
+  // POST method - update focus state
   err := r.ParseForm()
   if err != nil {
     http.Error(w, "Failed to parse form", http.StatusBadRequest)
@@ -62,45 +62,41 @@ func (s *Server) FocusHandler(w http.ResponseWriter, r *http.Request) {
   }
 
   focusing := r.FormValue("focusing") == "true"
-  log.Info("", "focusing", focusing)
+  log.Info("Focus change requested", "focusing", focusing)
 
+  // Get duration parameter with default of 30 seconds
   duration := r.FormValue("duration")
   if duration == "" {
     duration = "30"
   }
-  log.Info("", "duration", duration)
+  
   durationInt, err := strconv.Atoi(duration)
   if err != nil {
     http.Error(w, "Failed to parse duration", http.StatusBadRequest)
     return
   }
-  focusDuration := time.Duration(durationInt) * time.Second
-  if focusing {
-    s.State.SetFocusing(focusDuration)
-  } else {
-    s.State.SetUnfocusing()
-  }
+  log.Info("Focus parameters", "duration", durationInt)
 
+  // Update the focus state
+  message := s.State.HandleFocusChange(focusing, durationInt)
+  
   // Broadcast the new focus state to all connected clients
   go s.BroadcastFocusState()
 
-  // If focusing is true, start a goroutine to set focus to false after the specified duration
+  // If focusing is true, schedule auto-reset
   if focusing {
-    go func() {
-      time.Sleep(time.Duration(durationInt) * time.Second)
-      s.State.SetUnfocusing()
-      log.Info("Resetting focus after [duration] seconds", "duration", duration)
-      go s.BroadcastFocusState()
-    }()
+    s.State.ScheduleFocusReset(durationInt)
   }
 
-  w.WriteHeader(http.StatusOK)
-  message := GetFocusInfo(&s.State.internal)
+  // Return the updated focus state
   jsonMessage, err := json.Marshal(message)
   if err != nil {
-    log.Printf("Error marshaling focus state: %v", err)
+    log.Error("Error marshaling focus state", "err", err)
+    w.WriteHeader(http.StatusInternalServerError)
     return
   }
+  
+  w.WriteHeader(http.StatusOK)
   w.Write(jsonMessage)
 }
 
