@@ -4,20 +4,23 @@ on:
   push:
     branches: [ main ]  # Adjust this to your main branch name if different
 
+env:
+  GO_VERSION: 1.23.1
+  APP_NAME: coach
+  PATH: /opt/coach
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v2
-
-    - name: Set up Go
-      uses: actions/setup-go@v2
-      with:
-        go-version: 1.23.1
+    - uses: actions/checkout@v4
 
     - name: Build
-      run: go build -o coach .
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+      run: go build -o {{ env.APP_NAME }} .
 
     - name: Create coach_main directory
       uses: appleboy/ssh-action@master
@@ -26,7 +29,8 @@ jobs:
         username: root
         key: ${{ secrets.SSH_KEY }}
         script: |
-          mkdir -p /root/coach_main/assets
+          mkdir -p {{ env.PATH }}
+          mkdir -p {{ env.PATH }}/assets
 
     - name: Copy executable
       uses: appleboy/scp-action@master
@@ -35,7 +39,7 @@ jobs:
         username: root
         key: ${{ secrets.SSH_KEY }}
         source: "coach"
-        target: "/root/coach_main"
+        target: ${{ env.PATH }}
 
     - name: Copy quotes
       uses: appleboy/scp-action@master
@@ -44,7 +48,7 @@ jobs:
         username: root
         key: ${{ secrets.SSH_KEY }}
         source: "assets/quotes.txt"
-        target: "/root/coach_main"
+        target: ${{ env.PATH }}  
 
     - name: Execute remote commands
       uses: appleboy/ssh-action@master
@@ -54,14 +58,6 @@ jobs:
         key: ${{ secrets.SSH_KEY }}
         script: |
           chmod +x /root/coach_main/coach
-          
-    - name: Check and reload coach service
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.HOST }}
-        username: root
-        key: ${{ secrets.SSH_KEY }}
-        script: |
           if systemctl is-enabled coach.service; then
             systemctl reload coach.service || systemctl restart coach.service
             echo "Coach service reloaded/restarted successfully"
