@@ -77,16 +77,8 @@ func (s *Server) FocusHandler(w http.ResponseWriter, r *http.Request) {
   }
   log.Info("Focus parameters", "duration", durationInt)
 
-  // Update the focus state
-  message := s.State.HandleFocusChange(focusing, durationInt)
-  
-  // Broadcast the new focus state to all connected clients
-  go s.BroadcastFocusState()
-
-  // If focusing is true, schedule auto-reset
-  if focusing {
-    s.State.ScheduleFocusReset(durationInt)
-  }
+  // Update the focus state, broadcast changes, and schedule reset if needed
+  message := s.State.HandleFocusChange(focusing, durationInt, s)
 
   // Return the updated focus state
   jsonMessage, err := json.Marshal(message)

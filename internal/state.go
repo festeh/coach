@@ -63,15 +63,26 @@ func (s *State) SetUnfocusing() {
 }
 
 // HandleFocusChange processes a focus state change request
-// It returns the updated focus info and schedules auto-reset if needed
-func (s *State) HandleFocusChange(focusing bool, durationSeconds int) FocusInfo {
+// It returns the updated focus info, broadcasts the change, and schedules auto-reset if needed
+func (s *State) HandleFocusChange(focusing bool, durationSeconds int, server *Server) FocusInfo {
 	focusDuration := time.Duration(durationSeconds) * time.Second
 	
 	if focusing {
 		s.SetFocusing(focusDuration)
+		// Schedule auto-reset if focusing
+		go func() {
+			time.Sleep(focusDuration)
+			s.SetUnfocusing()
+			log.Info("Resetting focus after duration", "duration", durationSeconds)
+			// Broadcast the state change after reset
+			go server.BroadcastFocusState()
+		}()
 	} else {
 		s.SetUnfocusing()
 	}
+	
+	// Broadcast the new focus state to all connected clients
+	go server.BroadcastFocusState()
 	
 	// Get the updated focus info
 	s.mu.Lock()
@@ -79,15 +90,6 @@ func (s *State) HandleFocusChange(focusing bool, durationSeconds int) FocusInfo 
 	s.mu.Unlock()
 	
 	return info
-}
-
-// ScheduleFocusReset schedules the focus state to reset after the specified duration
-func (s *State) ScheduleFocusReset(durationSeconds int) {
-	go func() {
-		time.Sleep(time.Duration(durationSeconds) * time.Second)
-		s.SetUnfocusing()
-		log.Info("Resetting focus after duration", "duration", durationSeconds)
-	}()
 }
 
 // GetCurrentFocusInfo returns the current focus state information
