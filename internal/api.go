@@ -35,21 +35,22 @@ func (s *Server) HealthHandler(w http.ResponseWriter, r *http.Request) {
 // @Router /focusing [get]
 // @Router /focusing [post]
 func (s *Server) FocusHandler(w http.ResponseWriter, r *http.Request) {
-  log.Info("Focusing", "method", r.Method)
+  log.Info("Called /focusing", "method", r.Method)
   if r.Method != http.MethodGet && r.Method != http.MethodPost {
     http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
     return
   }
 
   if r.Method == http.MethodGet {
-    w.WriteHeader(http.StatusOK)
     message := GetFocusInfo(&s.State.internal)
     jsonMessage, err := json.Marshal(message)
     if err != nil {
       log.Printf("Error marshaling focus state: %v", err)
+      w.WriteHeader(http.StatusInternalServerError)
       return
     }
     w.Write(jsonMessage)
+    w.WriteHeader(http.StatusOK)
     return
   }
 
