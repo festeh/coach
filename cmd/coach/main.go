@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/log"
 
 	_ "coach/docs"
+  "coach/internal"
 
 	httpSwagger "github.com/swaggo/http-swagger"
 )
@@ -21,10 +22,10 @@ const port = ":8080"
 
 var (
 	clientsMux sync.Mutex
-	quoteStore QuoteStore
+	quoteStore coach.QuoteStore
 )
 
-var state = &State{}
+var state = &coach.State{}
 
 func main() {
 	log.SetTimeFormat(time.Stamp)
@@ -39,11 +40,9 @@ func main() {
 		log.Fatalf("Failed to load quotes: %v", err)
 	}
 
-	state.BroadcastFocusStateEveryMinute()
-
-	http.HandleFunc("/health", healthHandler)
-	http.HandleFunc("/focusing", focusHandler)
-	http.HandleFunc("/connect", websocketHandler)
+	http.HandleFunc("/health", coach.HealthHandler)
+	http.HandleFunc("/focusing", coach.FocusHandler)
+	http.HandleFunc("/connect", coach.WebsocketHandler)
 	http.Handle("/swagger/", httpSwagger.Handler(
 		httpSwagger.URL("/swagger/doc.json"),
 	))
@@ -51,13 +50,3 @@ func main() {
 	log.Fatal(http.ListenAndServe(port, nil))
 }
 
-// @Summary Health check endpoint
-// @Description Returns the health status of the API
-// @Tags health
-// @Produce plain
-// @Success 200 {string} string "Healthy"
-// @Router /health [get]
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Healthy"))
-}

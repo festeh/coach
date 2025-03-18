@@ -1,4 +1,4 @@
-package main
+package coach
 
 import (
 	"encoding/json"
@@ -46,14 +46,6 @@ func GetFocusInfo(s *InternalState) FocusInfo {
 	}
 }
 
-func (s *State) BroadcastFocusStateEveryMinute() {
-	ticker := time.NewTicker(1 * time.Minute)
-	go func() {
-		for range ticker.C {
-			broadcastFocusState()
-		}
-	}()
-}
 
 func (s *State) SetFocusing(duration time.Duration) {
 	s.mu.Lock()
