@@ -2,10 +2,6 @@ package coach
 
 import (
 	"net/http"
-	"sync"
-	"time"
-
-	"github.com/charmbracelet/log"
 	"github.com/gorilla/websocket"
 )
 
@@ -30,13 +26,11 @@ func NewServer() (*Server, error) {
 		},
 	}
 
-	// Load state
 	err := server.State.Load()
 	if err != nil {
 		return nil, err
 	}
 
-	// Load quotes
 	err = server.QuoteStore.Load()
 	if err != nil {
 		return nil, err
