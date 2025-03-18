@@ -20,7 +20,8 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: ${{ env.GO_VERSION }}
-      run: go build -o {{ env.APP_NAME }} .
+
+    - run: go build -o {{ env.APP_NAME }} .
 
     - name: Create coach_main directory
       uses: appleboy/ssh-action@master
