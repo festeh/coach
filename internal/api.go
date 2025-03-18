@@ -3,11 +3,9 @@ package coach
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/charmbracelet/log"
 	"net/http"
 	"strconv"
-	"time"
-
-	"github.com/charmbracelet/log"
 )
 
 // @Summary Health check endpoint
@@ -17,8 +15,8 @@ import (
 // @Success 200 {string} string "Healthy"
 // @Router /health [get]
 func (s *Server) HealthHandler(w http.ResponseWriter, r *http.Request) {
-  w.WriteHeader(http.StatusOK)
-  w.Write([]byte("Healthy"))
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Healthy"))
 }
 
 // @Summary Get or set focus state
@@ -35,61 +33,61 @@ func (s *Server) HealthHandler(w http.ResponseWriter, r *http.Request) {
 // @Router /focusing [get]
 // @Router /focusing [post]
 func (s *Server) FocusHandler(w http.ResponseWriter, r *http.Request) {
-  log.Info("Called /focusing", "method", r.Method)
-  if r.Method != http.MethodGet && r.Method != http.MethodPost {
-    http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-    return
-  }
+	log.Info("Called /focusing", "method", r.Method)
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-  // GET method - return current focus state
-  if r.Method == http.MethodGet {
-    message := s.State.GetCurrentFocusInfo()
-    jsonMessage, err := json.Marshal(message)
-    if err != nil {
-      log.Error("Error marshaling focus state", "err", err)
-      w.WriteHeader(http.StatusInternalServerError)
-      return
-    }
-    w.Write(jsonMessage)
-    return
-  }
+	// GET method - return current focus state
+	if r.Method == http.MethodGet {
+		message := s.State.GetCurrentFocusInfo()
+		jsonMessage, err := json.Marshal(message)
+		if err != nil {
+			log.Error("Error marshaling focus state", "err", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Write(jsonMessage)
+		return
+	}
 
-  // POST method - update focus state
-  err := r.ParseForm()
-  if err != nil {
-    http.Error(w, "Failed to parse form", http.StatusBadRequest)
-    return
-  }
+	// POST method - update focus state
+	err := r.ParseForm()
+	if err != nil {
+		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		return
+	}
 
-  focusing := r.FormValue("focusing") == "true"
-  log.Info("Focus change requested", "focusing", focusing)
+	focusing := r.FormValue("focusing") == "true"
+	log.Info("Focus change requested", "focusing", focusing)
 
-  // Get duration parameter with default of 30 seconds
-  duration := r.FormValue("duration")
-  if duration == "" {
-    duration = "30"
-  }
-  
-  durationInt, err := strconv.Atoi(duration)
-  if err != nil {
-    http.Error(w, "Failed to parse duration", http.StatusBadRequest)
-    return
-  }
-  log.Info("Focus parameters", "duration", durationInt)
+	// Get duration parameter with default of 30 seconds
+	duration := r.FormValue("duration")
+	if duration == "" {
+		duration = "30"
+	}
 
-  // Update the focus state, broadcast changes, and schedule reset if needed
-  message := s.State.HandleFocusChange(focusing, durationInt, s)
+	durationInt, err := strconv.Atoi(duration)
+	if err != nil {
+		http.Error(w, "Failed to parse duration", http.StatusBadRequest)
+		return
+	}
+	log.Info("Focus parameters", "duration", durationInt)
 
-  // Return the updated focus state
-  jsonMessage, err := json.Marshal(message)
-  if err != nil {
-    log.Error("Error marshaling focus state", "err", err)
-    w.WriteHeader(http.StatusInternalServerError)
-    return
-  }
-  
-  w.WriteHeader(http.StatusOK)
-  w.Write(jsonMessage)
+	// Update the focus state, broadcast changes, and schedule reset if needed
+	message := s.State.HandleFocusChange(focusing, durationInt, s)
+
+	// Return the updated focus state
+	jsonMessage, err := json.Marshal(message)
+	if err != nil {
+		log.Error("Error marshaling focus state", "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(jsonMessage)
 }
 
 // @Summary WebSocket connection endpoint
@@ -101,32 +99,32 @@ func (s *Server) FocusHandler(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "Bad Request"
 // @Router /connect [get]
 func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
-  log.Info("Client connected")
-  conn, err := s.upgrader.Upgrade(w, r, nil)
-  if err != nil {
-    log.Error(err)
-    return
-  }
+	log.Info("Client connected")
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Error(err)
+		return
+	}
 
-  s.State.AddClient(conn)
+	s.State.AddClient(conn)
 
-  defer func() {
-    conn.Close()
-    s.State.RemoveClient(conn)
-  }()
+	defer func() {
+		conn.Close()
+		s.State.RemoveClient(conn)
+	}()
 
-  for {
-    messageType, p, err := conn.ReadMessage()
-    fmt.Println(messageType, string(p), err)
-    if err != nil {
-      log.Error(err)
-      return
-    }
-    if string(p) == "get_quote" {
-      s.BroadcastQuote()
-    }
-    if string(p) == "get_focusing" {
-      s.BroadcastFocusState()
-    }
-  }
+	for {
+		messageType, p, err := conn.ReadMessage()
+		fmt.Println(messageType, string(p), err)
+		if err != nil {
+			log.Error(err)
+			return
+		}
+		if string(p) == "get_quote" {
+			s.BroadcastQuote()
+		}
+		if string(p) == "get_focusing" {
+			s.BroadcastFocusState()
+		}
+	}
 }
