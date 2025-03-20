@@ -228,7 +228,7 @@ func (s *State) NotifySingleClient(client *websocket.Conn, message any) error {
 	return nil
 }
 
-func (s *State) NotifyAllClient(message any) {
+func (s *State) NotifyAllClients(message any) {
 	log.Info("Notifying all clients")
 	s.mu.Lock()
 	defer s.mu.Unlock()

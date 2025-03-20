@@ -52,7 +52,7 @@ func (s *Server) SetupRoutes() http.Handler {
 // BroadcastFocusState sends the current focus state to all connected clients
 func (s *Server) BroadcastFocusState() {
 	message := s.State.GetCurrentFocusInfo()
-	s.State.NotifyAllClient(message)
+	s.State.NotifyAllClients(message)
 }
 
 // BroadcastQuote sends a random quote to all connected clients
@@ -65,5 +65,5 @@ func (s *Server) BroadcastQuote() {
 		Quote: s.QuoteStore.GetQuote().Text,
 	}
 	
-	s.State.NotifyAllClient(message)
+	s.State.NotifyAllClients(message)
 }
