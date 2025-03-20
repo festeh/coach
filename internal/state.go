@@ -212,22 +212,29 @@ func (s *State) RemoveClient(client *websocket.Conn) {
 	delete(s.clients, client)
 }
 
-func (s *State) BroadcastToClients(message interface{}) {
-	log.Info("Start broadcast")
+func (s *State) BroadcastToClient(client *websocket.Conn, message interface{}) error {
 	jsonMessage, err := json.Marshal(message)
 	if err != nil {
-		log.Error("Error marshaling message", "err", err)
-		return
+		return err
 	}
+	
+	err = client.WriteMessage(websocket.TextMessage, jsonMessage)
+	log.Info("Send message", "msg", string(jsonMessage), "to", client.RemoteAddr())
+	if err != nil {
+		log.Error("Error sending message to client", "err", err)
+		client.Close()
+		return err
+	}
+	return nil
+}
+
+func (s *State) BroadcastToClients(message interface{}) {
+	log.Info("Start broadcast")
 	
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for client := range s.clients {
-		err := client.WriteMessage(websocket.TextMessage, jsonMessage)
-		log.Info("Send message", "msg", string(jsonMessage), "to", client.RemoteAddr())
-		if err != nil {
-			log.Error("Error sending message to client", "err", err)
-			client.Close()
+		if err := s.BroadcastToClient(client, message); err != nil {
 			delete(s.clients, client)
 		}
 	}
