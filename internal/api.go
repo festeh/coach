@@ -107,6 +107,12 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.State.AddClient(conn)
+	
+	// Send current focus state to newly connected client
+	message := s.State.GetCurrentFocusInfo()
+	if err := s.State.NotifySingleClient(conn, message); err != nil {
+		log.Error("Failed to send initial focus state to client", "err", err)
+	}
 
 	defer func() {
 		conn.Close()
