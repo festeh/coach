@@ -212,14 +212,14 @@ func (s *State) RemoveClient(client *websocket.Conn) {
 	delete(s.clients, client)
 }
 
-func (s *State) BroadcastToClient(client *websocket.Conn, message interface{}) error {
+func (s *State) NotifySingleClient(client *websocket.Conn, message any) error {
 	jsonMessage, err := json.Marshal(message)
 	if err != nil {
 		return err
 	}
 	
 	err = client.WriteMessage(websocket.TextMessage, jsonMessage)
-	log.Info("Send message", "msg", string(jsonMessage), "to", client.RemoteAddr())
+	log.Info("Notifying", "msg", string(jsonMessage), "to", client.RemoteAddr())
 	if err != nil {
 		log.Error("Error sending message to client", "err", err)
 		client.Close()
@@ -228,13 +228,12 @@ func (s *State) BroadcastToClient(client *websocket.Conn, message interface{}) e
 	return nil
 }
 
-func (s *State) BroadcastToClients(message interface{}) {
-	log.Info("Start broadcast")
-	
+func (s *State) NotifyAllClient(message any) {
+	log.Info("Notifying all clients")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for client := range s.clients {
-		if err := s.BroadcastToClient(client, message); err != nil {
+		if err := s.NotifySingleClient(client, message); err != nil {
 			delete(s.clients, client)
 		}
 	}
