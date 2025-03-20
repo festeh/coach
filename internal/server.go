@@ -49,12 +49,6 @@ func (s *Server) SetupRoutes() http.Handler {
 	return mux
 }
 
-// BroadcastFocusState sends the current focus state to all connected clients
-func (s *Server) BroadcastFocusState() {
-	message := s.State.GetCurrentFocusInfo()
-	s.State.NotifyAllClients(message)
-}
-
 // BroadcastQuote sends a random quote to all connected clients
 func (s *Server) BroadcastQuote() {
 	message := struct {

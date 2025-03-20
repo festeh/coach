@@ -124,7 +124,8 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 			s.BroadcastQuote()
 		}
 		if string(p) == "get_focusing" {
-			s.BroadcastFocusState()
+      message := s.State.GetCurrentFocusInfo()
+      s.State.NotifyAllClients(message)
 		}
 	}
 }

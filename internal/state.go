@@ -99,7 +99,8 @@ func (s *State) HandleFocusChange(focusing bool, durationSeconds int, server *Se
 			if shouldUnfocus {
 				log.Info("All focus periods expired, unfocusing", "duration", durationSeconds)
 				s.SetUnfocusing()
-				go server.BroadcastFocusState()
+        message := s.GetCurrentFocusInfo()
+        go s.NotifyAllClients(message)
 			} else {
 				log.Info("Focus period expired but other active focus periods remain")
 			}
@@ -114,7 +115,8 @@ func (s *State) HandleFocusChange(focusing bool, durationSeconds int, server *Se
 	}
 	
 	// Broadcast the new focus state to all connected clients
-	go server.BroadcastFocusState()
+  message := s.GetCurrentFocusInfo()
+  go s.NotifyAllClients(message)
 	
 	// Get the updated focus info
 	s.mu.Lock()
