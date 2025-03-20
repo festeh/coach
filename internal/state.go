@@ -31,6 +31,7 @@ type State struct {
 }
 
 type FocusInfo struct {
+	Type            string        `json:"type"`
 	Focusing        bool          `json:"focusing"`
 	SinceLastChange time.Duration `json:"since_last_change"`
 	FocusTimeLeft   time.Duration `json:"focus_time_left"`
@@ -46,12 +47,12 @@ func GetFocusInfo(s *InternalState) FocusInfo {
 		focusTimeLeft = time.Duration(0)
 	}
 	return FocusInfo{
+		Type:            "focusing",
 		Focusing:        s.IsFocusing,
 		SinceLastChange: sinceLastChange / time.Second,
 		FocusTimeLeft:   focusTimeLeft / time.Second,
 	}
 }
-
 
 func (s *State) SetFocusing(duration time.Duration) {
 	s.mu.Lock()
@@ -59,10 +60,10 @@ func (s *State) SetFocusing(duration time.Duration) {
 	s.internal.IsFocusing = true
 	s.internal.Duration = duration
 	s.internal.LastChange = time.Now()
-  s.focusRequests = append(s.focusRequests, FocusRequest{
-    StartTime: s.internal.LastChange,
-    EndTime:   s.internal.LastChange.Add(duration),
-  })
+	s.focusRequests = append(s.focusRequests, FocusRequest{
+		StartTime: s.internal.LastChange,
+		EndTime:   s.internal.LastChange.Add(duration),
+	})
 }
 
 func (s *State) SetUnfocusing() {
@@ -76,14 +77,14 @@ func (s *State) SetUnfocusing() {
 // It returns the updated focus info, broadcasts the change, and schedules auto-reset if needed
 func (s *State) HandleFocusChange(focusing bool, durationSeconds int, server *Server) FocusInfo {
 	focusDuration := time.Duration(durationSeconds) * time.Second
-	
+
 	if focusing {
 		s.SetFocusing(focusDuration)
-		
+
 		// Schedule auto-reset if focusing
 		go func() {
 			time.Sleep(focusDuration)
-			
+
 			s.mu.Lock()
 			// Remove expired focus request
 			for i := 0; i < len(s.focusRequests); i++ {
@@ -92,15 +93,15 @@ func (s *State) HandleFocusChange(focusing bool, durationSeconds int, server *Se
 					i-- // Adjust index after removal
 				}
 			}
-			
+
 			shouldUnfocus := len(s.focusRequests) == 0
 			s.mu.Unlock()
-			
+
 			if shouldUnfocus {
 				log.Info("All focus periods expired, unfocusing", "duration", durationSeconds)
 				s.SetUnfocusing()
-        message := s.GetCurrentFocusInfo()
-        go s.NotifyAllClients(message)
+				message := s.GetCurrentFocusInfo()
+				go s.NotifyAllClients(message)
 			} else {
 				log.Info("Focus period expired but other active focus periods remain")
 			}
@@ -110,19 +111,19 @@ func (s *State) HandleFocusChange(focusing bool, durationSeconds int, server *Se
 		s.mu.Lock()
 		s.focusRequests = nil
 		s.mu.Unlock()
-		
+
 		s.SetUnfocusing()
 	}
-	
+
 	// Broadcast the new focus state to all connected clients
-  message := s.GetCurrentFocusInfo()
-  go s.NotifyAllClients(message)
-	
+	message := s.GetCurrentFocusInfo()
+	go s.NotifyAllClients(message)
+
 	// Get the updated focus info
 	s.mu.Lock()
 	info := GetFocusInfo(&s.internal)
 	s.mu.Unlock()
-	
+
 	return info
 }
 
@@ -130,7 +131,7 @@ func (s *State) HandleFocusChange(focusing bool, durationSeconds int, server *Se
 func (s *State) GetCurrentFocusInfo() FocusInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// Clean up expired focus requests
 	now := time.Now()
 	activeRequests := []FocusRequest{}
@@ -140,7 +141,7 @@ func (s *State) GetCurrentFocusInfo() FocusInfo {
 		}
 	}
 	s.focusRequests = activeRequests
-	
+
 	// Find the latest end time among active requests
 	var latestEndTime time.Time
 	for _, req := range s.focusRequests {
@@ -148,12 +149,12 @@ func (s *State) GetCurrentFocusInfo() FocusInfo {
 			latestEndTime = req.EndTime
 		}
 	}
-	
+
 	// Update duration if we have active requests
 	if len(s.focusRequests) > 0 && s.internal.IsFocusing {
 		s.internal.Duration = latestEndTime.Sub(s.internal.LastChange)
 	}
-	
+
 	return GetFocusInfo(&s.internal)
 }
 
@@ -219,7 +220,7 @@ func (s *State) NotifySingleClient(client *websocket.Conn, message any) error {
 	if err != nil {
 		return err
 	}
-	
+
 	err = client.WriteMessage(websocket.TextMessage, jsonMessage)
 	log.Info("Notifying", "msg", string(jsonMessage), "to", client.RemoteAddr())
 	if err != nil {
