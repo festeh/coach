@@ -85,6 +85,55 @@ func InitManager() (*Manager, error) {
 	return manager, nil
 }
 
+// GetTodayFocusCount returns the count of focus entries for today
+func (m *Manager) GetTodayFocusCount() (int, error) {
+	// Get today's date in YYYY-MM-DD format
+	today := time.Now().Format("2006-01-02")
+	
+	// Create filter for today's entries
+	filter := fmt.Sprintf("created >= '%sT00:00:00.000Z' && created <= '%sT23:59:59.999Z'", today, today)
+	
+	// Build the URL with filter
+	endpoint := fmt.Sprintf("%s/api/collections/coach/records?filter=%s", m.BaseURL, filter)
+	
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	req.Header.Set("Authorization", m.AuthToken)
+	
+	resp, err := m.Client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read response body: %w", err)
+	}
+	
+	if resp.StatusCode != http.StatusOK {
+		var errResp ErrorResponse
+		if err := json.Unmarshal(body, &errResp); err != nil {
+			return 0, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+		}
+		return 0, fmt.Errorf("request failed: %s", errResp.Message)
+	}
+	
+	// Parse the response to get the total count
+	var result struct {
+		TotalItems int `json:"totalItems"`
+	}
+	
+	if err := json.Unmarshal(body, &result); err != nil {
+		return 0, fmt.Errorf("failed to parse response: %w", err)
+	}
+	
+	return result.TotalItems, nil
+}
+
 func (m *Manager) AddRecord(data map[string]any) error {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
