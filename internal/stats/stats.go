@@ -9,25 +9,25 @@ type Stats struct {
 	focusingByDay map[string]int
 }
 
+// getToday returns today's date in YYYY-MM-DD format
+func (s *Stats) getToday() string {
+	return time.Now().Format("2006-01-02")
+}
+
 // GetTodayFocusCount returns the number of focus entries for today
 func (s *Stats) GetTodayFocusCount() int {
-	today := time.Now().Format("2006-01-02")
-	return s.focusingByDay[today]
+	return s.focusingByDay[s.getToday()]
 }
 
 // BumpTodaysFocusCount increments the count of focus entries for today
 func (s *Stats) BumpTodaysFocusCount() {
-	today := time.Now().Format("2006-01-02")
-	s.focusingByDay[today]++
+	s.focusingByDay[s.getToday()]++
 }
 
 func NewStats(manager *db.Manager) (*Stats, error) {
 	stats := &Stats{
 		focusingByDay: make(map[string]int),
 	}
-	
-	// Get today's date in YYYY-MM-DD format
-	today := time.Now().Format("2006-01-02")
 	
 	// Get count of today's focus entries
 	count, err := manager.GetTodayFocusCount()
@@ -36,7 +36,7 @@ func NewStats(manager *db.Manager) (*Stats, error) {
 	}
 	
 	// Store the count for today
-	stats.focusingByDay[today] = count
+	stats.focusingByDay[stats.getToday()] = count
 	
 	return stats, nil
 }
