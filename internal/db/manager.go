@@ -98,11 +98,15 @@ func (m *Manager) GetTodayFocusCount() (int, error) {
 	}
 
 	q := u.Query()
-	filter := fmt.Sprintf("(timestamp >= '%sT00:00:00.000Z' && timestamp <= '%sT23:59:59.999Z')", today, today)
+	// Simplify the filter to just get all records
+	filter := "created >= '2000-01-01 00:00:00'"
 	q.Set("filter", filter)
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequest("GET", u.String(), nil)
+	fullURL := u.String()
+	log.Info("Request URL", "url", fullURL)
+
+	req, err := http.NewRequest("GET", fullURL, nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -132,7 +136,7 @@ func (m *Manager) GetTodayFocusCount() (int, error) {
 		TotalItems int `json:"totalItems"`
 	}
 
-	log.Info("", "body", string(body))
+	log.Info("Response body", "body", string(body))
 
 	if err := json.Unmarshal(body, &result); err != nil {
 		return 0, fmt.Errorf("failed to parse response: %w", err)
