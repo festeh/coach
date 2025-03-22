@@ -88,7 +88,7 @@ func InitManager() (*Manager, error) {
 
 func (m *Manager) GetTodayFocusCount() (int, error) {
 	log.Info("Getting today's focus count")
-	// today := time.Now().Format("2006-01-02")
+	today := time.Now().Format("2006-01-02")
 
 	// Create the URL with properly encoded query parameters
 	baseEndpoint := fmt.Sprintf("%s/api/collections/coach/records", m.BaseURL)
@@ -98,8 +98,8 @@ func (m *Manager) GetTodayFocusCount() (int, error) {
 	}
 
 	q := u.Query()
-	// Simplify the filter to just get all records
-	filter := "timestamp >= '2000-01-01T00:00:00.000Z'"
+	// Filter for records from today (using the timestamp field format from the response)
+	filter := fmt.Sprintf("timestamp ~ '%s'", today)
 	q.Set("filter", filter)
 	u.RawQuery = q.Encode()
 
@@ -132,16 +132,21 @@ func (m *Manager) GetTodayFocusCount() (int, error) {
 		return 0, fmt.Errorf("request failed: %s", errResp.Message)
 	}
 
+	// Parse the response to count today's focus sessions
 	var result struct {
+		Items []struct {
+			ID        string `json:"id"`
+			Timestamp string `json:"timestamp"`
+			Duration  int    `json:"duration"`
+		} `json:"items"`
 		TotalItems int `json:"totalItems"`
 	}
-
-	log.Info("Response body", "body", string(body))
 
 	if err := json.Unmarshal(body, &result); err != nil {
 		return 0, fmt.Errorf("failed to parse response: %w", err)
 	}
 
+	log.Info("Found focus sessions", "count", result.TotalItems)
 	return result.TotalItems, nil
 }
 
