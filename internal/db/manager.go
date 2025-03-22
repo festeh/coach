@@ -88,7 +88,7 @@ func InitManager() (*Manager, error) {
 
 func (m *Manager) GetTodayFocusCount() (int, error) {
 	log.Info("Getting today's focus count")
-	today := time.Now().Format("2006-01-02")
+	// today := time.Now().Format("2006-01-02")
 
 	// Create the URL with properly encoded query parameters
 	baseEndpoint := fmt.Sprintf("%s/api/collections/coach/records", m.BaseURL)
@@ -99,7 +99,7 @@ func (m *Manager) GetTodayFocusCount() (int, error) {
 
 	q := u.Query()
 	// Simplify the filter to just get all records
-	filter := "created >= '2000-01-01 00:00:00'"
+	filter := "timestamp >= '2000-01-01T00:00:00.000Z'"
 	q.Set("filter", filter)
 	u.RawQuery = q.Encode()
 
