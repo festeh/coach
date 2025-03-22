@@ -9,20 +9,14 @@ import (
 	"strings"
 	"time"
 
-	log "golang.org/x/exp/slog"
+	"github.com/charmbracelet/log"
+	"github.com/joho/godotenv"
 )
 
 const (
 	loginEndpoint = "/api/collections/_superusers/auth-with-password"
-	secretsFile   = "secrets.json"
+	envFile       = ".env"
 )
-
-// Credentials holds the PocketBase authentication credentials
-type Credentials struct {
-	URL      string `json:"pb_url"`
-	Email    string `json:"pb_email"`
-	Password string `json:"pb_password"`
-}
 
 // AuthResponse represents the authentication response from PocketBase
 type AuthResponse struct {
@@ -48,21 +42,25 @@ type Manager struct {
 }
 
 // InitManager initializes a new database manager
-// It loads credentials from the secrets file and authenticates with PocketBase
+// It loads credentials from the .env file and authenticates with PocketBase
 func InitManager() (*Manager, error) {
-	// Load credentials from secrets file
-	creds, err := loadCredentials()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load credentials: %w", err)
+	// Load environment variables from .env file
+	if err := godotenv.Load(envFile); err != nil {
+		return nil, fmt.Errorf("failed to load .env file: %w", err)
 	}
 
+	// Get credentials from environment variables
+	pbURL := os.Getenv("PB_URL")
+	pbEmail := os.Getenv("PB_EMAIL")
+	pbPassword := os.Getenv("PB_PASSWORD")
+
 	// Validate credentials
-	if creds.URL == "" || creds.Email == "" || creds.Password == "" {
-		return nil, fmt.Errorf("missing required credentials in secrets file")
+	if pbURL == "" || pbEmail == "" || pbPassword == "" {
+		return nil, fmt.Errorf("missing required environment variables: PB_URL, PB_EMAIL, PB_PASSWORD")
 	}
 
 	// Ensure URL has proper format
-	baseURL := creds.URL
+	baseURL := pbURL
 	if !strings.HasPrefix(baseURL, "http") {
 		baseURL = "http://" + baseURL
 	}
@@ -77,7 +75,7 @@ func InitManager() (*Manager, error) {
 	}
 
 	// Authenticate
-	token, err := manager.authenticate(creds.Email, creds.Password)
+	token, err := manager.authenticate(pbEmail, pbPassword)
 	if err != nil {
 		return nil, fmt.Errorf("authentication failed: %w", err)
 	}
@@ -87,20 +85,6 @@ func InitManager() (*Manager, error) {
 	return manager, nil
 }
 
-// loadCredentials loads the PocketBase credentials from the secrets file
-func loadCredentials() (*Credentials, error) {
-	data, err := os.ReadFile(secretsFile)
-	if err != nil {
-		return nil, err
-	}
-
-	var creds Credentials
-	if err := json.Unmarshal(data, &creds); err != nil {
-		return nil, err
-	}
-
-	return &creds, nil
-}
 
 // authenticate authenticates with PocketBase and returns the auth token
 func (m *Manager) authenticate(email, password string) (string, error) {
