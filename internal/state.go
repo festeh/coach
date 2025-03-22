@@ -259,8 +259,9 @@ func (s *State) NotifySingleClient(client *websocket.Conn, message any) error {
 }
 
 func (s *State) NotifyAllClients(message any) {
-	log.Info("Notifying all clients")
 	s.mu.Lock()
+	clientCount := len(s.clients)
+	log.Info("Notifying all clients", "count", clientCount)
 	defer s.mu.Unlock()
 	for client := range s.clients {
 		if err := s.NotifySingleClient(client, message); err != nil {
