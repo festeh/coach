@@ -72,7 +72,6 @@ jobs:
         username: root
         key: ${{ secrets.SSH_KEY }}
         script: |
-          chmod +x ${{ env.DEPLOY_PATH }}/coach
           if systemctl is-enabled coach.service; then
             systemctl reload coach.service || systemctl restart coach.service
             echo "Coach service reloaded/restarted successfully"
