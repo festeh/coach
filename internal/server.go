@@ -30,10 +30,10 @@ func NewServer() (*Server, error) {
 		},
 	}
 
-	// err := server.QuoteStore.Load()
-	// if err != nil {
-	// 	return nil, err
-	// }
+	err := server.QuoteStore.Load()
+	if err != nil {
+		return nil, err
+	}
 
 	// Initialize database manager
 	dbManager, err := db.InitManager()
