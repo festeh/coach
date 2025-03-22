@@ -85,6 +85,44 @@ func InitManager() (*Manager, error) {
 	return manager, nil
 }
 
+// AddRecord adds a new record to the specified collection
+func (m *Manager) AddRecord(collection string, data map[string]interface{}) error {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal record data: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("%s/api/collections/%s/records", m.BaseURL, collection)
+	req, err := http.NewRequest("POST", endpoint, strings.NewReader(string(jsonData)))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", m.AuthToken)
+
+	resp, err := m.Client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var errResp ErrorResponse
+		if err := json.Unmarshal(body, &errResp); err != nil {
+			return fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+		}
+		return fmt.Errorf("request failed: %s", errResp.Message)
+	}
+
+	return nil
+}
+
 // authenticate authenticates with PocketBase and returns the auth token
 func (m *Manager) authenticate(email, password string) (string, error) {
 	data := map[string]string{
