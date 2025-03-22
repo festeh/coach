@@ -98,7 +98,7 @@ func (m *Manager) GetTodayFocusCount() (int, error) {
 	}
 
 	q := u.Query()
-	filter := fmt.Sprintf("timestamp > '%sT00:00:00.000Z'", today)
+	filter := fmt.Sprintf("(timestamp >= '%sT00:00:00.000Z' && timestamp <= '%sT23:59:59.999Z')", today, today)
 	q.Set("filter", filter)
 	u.RawQuery = q.Encode()
 
