@@ -23,10 +23,14 @@ type InternalState struct {
 	Duration time.Duration `json:"duration"`
 }
 
+// Hook is a function that is called when focus state changes
+type Hook func(*State)
+
 type State struct {
 	internal      InternalState
 	clients       map[*websocket.Conn]bool
 	focusRequests []FocusRequest
+	hooks         []Hook
 	mu            sync.Mutex
 }
 
@@ -54,9 +58,15 @@ func GetFocusInfo(s *InternalState) FocusInfo {
 	}
 }
 
-func (s *State) SetFocusing(duration time.Duration) {
+// AddHook registers a new hook function to be called when focus state changes
+func (s *State) AddHook(hook Hook) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.hooks = append(s.hooks, hook)
+}
+
+func (s *State) SetFocusing(duration time.Duration) {
+	s.mu.Lock()
 	s.internal.IsFocusing = true
 	s.internal.Duration = duration
 	s.internal.LastChange = time.Now()
@@ -64,13 +74,32 @@ func (s *State) SetFocusing(duration time.Duration) {
 		StartTime: s.internal.LastChange,
 		EndTime:   s.internal.LastChange.Add(duration),
 	})
+	
+	// Get a copy of hooks to execute outside the lock
+	hooks := make([]Hook, len(s.hooks))
+	copy(hooks, s.hooks)
+	s.mu.Unlock()
+	
+	// Execute hooks outside the lock to prevent deadlocks
+	for _, hook := range hooks {
+		hook(s)
+	}
 }
 
 func (s *State) SetUnfocusing() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.internal.IsFocusing = false
 	s.internal.LastChange = time.Now()
+	
+	// Get a copy of hooks to execute outside the lock
+	hooks := make([]Hook, len(s.hooks))
+	copy(hooks, s.hooks)
+	s.mu.Unlock()
+	
+	// Execute hooks outside the lock to prevent deadlocks
+	for _, hook := range hooks {
+		hook(s)
+	}
 }
 
 // HandleFocusChange processes a focus state change request
