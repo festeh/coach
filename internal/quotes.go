@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"os"
 
-	"golang.org/x/exp/rand"
 )
 
 type Quote struct {
@@ -38,6 +37,6 @@ func (s *QuoteStore) Load() error {
 }
 
 func (s *QuoteStore) GetQuote() Quote {
-	randomIndex := rand.Intn(len(s.Quotes))
+	randomIndex := 0
 	return s.Quotes[randomIndex]
 }
