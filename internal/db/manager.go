@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -86,11 +87,26 @@ func InitManager() (*Manager, error) {
 }
 
 func (m *Manager) GetTodayFocusCount() (int, error) {
-  log.Info("Getting today's focus count")
+	log.Info("Getting today's focus count")
 	today := time.Now().Format("2006-01-02")
+	
+	// Create the filter string
 	filter := fmt.Sprintf("(timestamp >= '%sT00:00:00.000Z' && timestamp <= '%sT23:59:59.999Z')", today, today)
-	endpoint := fmt.Sprintf("%s/api/collections/coach/records?filter=%s", m.BaseURL, filter)
-	req, err := http.NewRequest("GET", endpoint, nil)
+	
+	// Create the URL with properly encoded query parameters
+	baseEndpoint := fmt.Sprintf("%s/api/collections/coach/records", m.BaseURL)
+	u, err := url.Parse(baseEndpoint)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse URL: %w", err)
+	}
+	
+	// Add query parameters
+	q := u.Query()
+	q.Set("filter", filter)
+	u.RawQuery = q.Encode()
+	
+	// Now use the properly encoded URL
+	req, err := http.NewRequest("GET", u.String(), nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
