@@ -9,21 +9,15 @@ import (
 
 	"github.com/charmbracelet/log"
 
-	"github.com/yourusername/coach/internal/db"
+	"coach/internal/db"
 )
 
 // Hook is a function that is called when focus state changes
 type Hook func(*State)
 
-// DatabaseHook creates a hook that records focus state changes to the database
 func DatabaseHook(manager *db.Manager) Hook {
 	return func(s *State) {
-		// Skip if not focusing (only record when focus starts)
-		if !s.Focusing() {
-			return
-		}
 
-		// Get current state information
 		s.mu.Lock()
 		duration := s.internal.Duration
 		timestamp := s.internal.LastChange
@@ -35,14 +29,12 @@ func DatabaseHook(manager *db.Manager) Hook {
 			"duration":  int(duration.Seconds()),
 		}
 
-		// Convert to JSON
 		jsonData, err := json.Marshal(record)
 		if err != nil {
 			log.Error("Failed to marshal focus record", "error", err)
 			return
 		}
 
-		// Send to database
 		go func() {
 			endpoint := fmt.Sprintf("%s/api/collections/coach/records", manager.BaseURL)
 			req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(jsonData))
@@ -62,8 +54,8 @@ func DatabaseHook(manager *db.Manager) Hook {
 			defer resp.Body.Close()
 
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-				log.Info("Focus record saved to database", 
-					"timestamp", timestamp.Format(time.RFC3339), 
+				log.Info("Focus record saved to database",
+					"timestamp", timestamp.Format(time.RFC3339),
 					"duration", duration.String())
 			} else {
 				log.Error("Failed to save focus record", "status", resp.StatusCode)
