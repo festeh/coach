@@ -23,8 +23,6 @@ type InternalState struct {
 	Duration time.Duration `json:"duration"`
 }
 
-// Hook is a function that is called when focus state changes
-type Hook func(*State)
 
 type State struct {
 	internal      InternalState
