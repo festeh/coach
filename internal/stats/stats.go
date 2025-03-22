@@ -15,6 +15,12 @@ func (s *Stats) GetTodayFocusCount() int {
 	return s.focusingByDay[today]
 }
 
+// BumpTodaysFocusCount increments the count of focus entries for today
+func (s *Stats) BumpTodaysFocusCount() {
+	today := time.Now().Format("2006-01-02")
+	s.focusingByDay[today]++
+}
+
 func NewStats(manager *db.Manager) (*Stats, error) {
 	stats := &Stats{
 		focusingByDay: make(map[string]int),
