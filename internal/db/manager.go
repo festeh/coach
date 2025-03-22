@@ -88,9 +88,8 @@ func InitManager() (*Manager, error) {
 func (m *Manager) GetTodayFocusCount() (int, error) {
   log.Info("Getting today's focus count")
 	today := time.Now().Format("2006-01-02")
-	filter := fmt.Sprintf("created >= '%sT00:00:00.000Z' && created <= '%sT23:59:59.999Z'", today, today)
+	filter := fmt.Sprintf("(timestamp >= '%sT00:00:00.000Z' && timestamp <= '%sT23:59:59.999Z')", today, today)
 	endpoint := fmt.Sprintf("%s/api/collections/coach/records?filter=%s", m.BaseURL, filter)
-	
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create request: %w", err)
