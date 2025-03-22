@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"math/rand"
 	"os"
-	"time"
 )
 
 type Quote struct {
@@ -37,17 +36,12 @@ func (s *QuoteStore) Load() error {
 	return nil
 }
 
-func init() {
-	// Seed the random number generator
-	rand.Seed(time.Now().UnixNano())
-}
-
 func (s *QuoteStore) GetQuote() Quote {
 	// Make sure we have quotes to return
 	if len(s.Quotes) == 0 {
 		return Quote{Text: "No quotes available"}
 	}
-	
+
 	// Generate a random index between 0 and len(s.Quotes)-1
 	randomIndex := rand.Intn(len(s.Quotes))
 	return s.Quotes[randomIndex]
