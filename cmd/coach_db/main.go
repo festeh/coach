@@ -2,17 +2,12 @@ package main
 
 import (
 	"bytes"
+	"coach/internal/db"
 	"encoding/json"
 	"fmt"
+	"github.com/charmbracelet/log"
 	"io"
 	"net/http"
-	"os"
-	"time"
-
-	"github.com/charmbracelet/log"
-	"github.com/joho/godotenv"
-
-	"github.com/your-username/coach/internal/db"
 )
 
 // PocketBase API endpoints
@@ -35,7 +30,6 @@ type Field struct {
 	Required bool   `json:"required"`
 	Options  any    `json:"options,omitempty"`
 }
-
 
 // CollectionListResponse represents the response when listing collections
 type CollectionListResponse struct {

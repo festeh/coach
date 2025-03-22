@@ -3,7 +3,7 @@ package db
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -85,7 +85,6 @@ func InitManager() (*Manager, error) {
 	return manager, nil
 }
 
-
 // authenticate authenticates with PocketBase and returns the auth token
 func (m *Manager) authenticate(email, password string) (string, error) {
 	data := map[string]string{
@@ -109,7 +108,7 @@ func (m *Manager) authenticate(email, password string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
