@@ -13,7 +13,7 @@ import (
 
 // PocketBase API endpoints
 const (
-	loginEndpoint      = "/api/admins/auth-with-password"
+	loginEndpoint       = "/api/collections/_superusers/auth-with-password"
 	collectionsEndpoint = "/api/collections"
 )
 
@@ -30,8 +30,8 @@ type AuthResponse struct {
 type Collection struct {
 	Name    string   `json:"name"`
 	Type    string   `json:"type"`
-	Schema  []Field  `json:"schema"`
-	Indexes []string `json:"indexes,omitempty"`
+	Fields  []Field  `json:"fields"`
+	Indexes []string `json:"indexes"`
 }
 
 // Field represents a schema field in PocketBase
@@ -184,19 +184,10 @@ func createCollection(baseURL, token string) error {
 	collection := Collection{
 		Name: "coach",
 		Type: "base",
-		Schema: []Field{
-			{
-				Name:     "id",
-				Type:     "number",
-				Required: true,
-				Options: map[string]interface{}{
-					"min": 1,
-					"max": nil,
-				},
-			},
+		Fields: []Field{
 			{
 				Name:     "timestamp",
-				Type:     "number",
+				Type:     "date",
 				Required: true,
 				Options: map[string]interface{}{
 					"min": nil,
@@ -213,7 +204,7 @@ func createCollection(baseURL, token string) error {
 				},
 			},
 		},
-		Indexes: []string{"id"},
+		Indexes: []string{"CREATE UNIQUE INDEX `ts_index` ON `coach` (`timestamp`)"},
 	}
 
 	jsonData, err := json.Marshal(collection)
