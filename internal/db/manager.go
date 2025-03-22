@@ -85,14 +85,13 @@ func InitManager() (*Manager, error) {
 	return manager, nil
 }
 
-// AddRecord adds a new record to the specified collection
-func (m *Manager) AddRecord(collection string, data map[string]interface{}) error {
+func (m *Manager) AddRecord(data map[string]any) error {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("failed to marshal record data: %w", err)
 	}
 
-	endpoint := fmt.Sprintf("%s/api/collections/%s/records", m.BaseURL, collection)
+	endpoint := fmt.Sprintf("%s/api/collections/coach/records", m.BaseURL)
 	req, err := http.NewRequest("POST", endpoint, strings.NewReader(string(jsonData)))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -123,7 +122,6 @@ func (m *Manager) AddRecord(collection string, data map[string]interface{}) erro
 	return nil
 }
 
-// authenticate authenticates with PocketBase and returns the auth token
 func (m *Manager) authenticate(email, password string) (string, error) {
 	data := map[string]string{
 		"identity": email,
