@@ -89,41 +89,39 @@ func InitManager() (*Manager, error) {
 func (m *Manager) GetTodayFocusCount() (int, error) {
 	log.Info("Getting today's focus count")
 	today := time.Now().Format("2006-01-02")
-	
-	// Create the filter string
-	filter := fmt.Sprintf("(timestamp >= '%sT00:00:00.000Z' && timestamp <= '%sT23:59:59.999Z')", today, today)
-	
+
 	// Create the URL with properly encoded query parameters
 	baseEndpoint := fmt.Sprintf("%s/api/collections/coach/records", m.BaseURL)
 	u, err := url.Parse(baseEndpoint)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse URL: %w", err)
 	}
-	
+
 	// Add query parameters
 	q := u.Query()
+	filter := fmt.Sprintf("(timestamp >= '%sT00:00:00.000Z')", today)
 	q.Set("filter", filter)
 	u.RawQuery = q.Encode()
-	
+
 	// Now use the properly encoded URL
 	req, err := http.NewRequest("GET", u.String(), nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
-	
+
 	req.Header.Set("Authorization", m.AuthToken)
-	
+
 	resp, err := m.Client.Do(req)
 	if err != nil {
 		return 0, fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return 0, fmt.Errorf("failed to read response body: %w", err)
 	}
-	
+
 	if resp.StatusCode != http.StatusOK {
 		var errResp ErrorResponse
 		if err := json.Unmarshal(body, &errResp); err != nil {
@@ -131,15 +129,15 @@ func (m *Manager) GetTodayFocusCount() (int, error) {
 		}
 		return 0, fmt.Errorf("request failed: %s", errResp.Message)
 	}
-	
+
 	var result struct {
 		TotalItems int `json:"totalItems"`
 	}
-	
+
 	if err := json.Unmarshal(body, &result); err != nil {
 		return 0, fmt.Errorf("failed to parse response: %w", err)
 	}
-	
+
 	return result.TotalItems, nil
 }
 
