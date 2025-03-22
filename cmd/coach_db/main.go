@@ -5,26 +5,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/charmbracelet/log"
+	"github.com/joho/godotenv"
+
+	"github.com/your-username/coach/internal/db"
 )
 
 // PocketBase API endpoints
 const (
-	loginEndpoint       = "/api/collections/_superusers/auth-with-password"
 	collectionsEndpoint = "/api/collections"
 )
-
-// Authentication response from PocketBase
-type AuthResponse struct {
-	Token string `json:"token"`
-	Admin struct {
-		ID    string `json:"id"`
-		Email string `json:"email"`
-	} `json:"admin"`
-}
 
 // Collection schema for PocketBase
 type Collection struct {
@@ -42,12 +36,6 @@ type Field struct {
 	Options  any    `json:"options,omitempty"`
 }
 
-// Error response from PocketBase
-type ErrorResponse struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Data    any    `json:"data"`
-}
 
 // CollectionListResponse represents the response when listing collections
 type CollectionListResponse struct {
@@ -58,95 +46,41 @@ type CollectionListResponse struct {
 }
 
 func main() {
-	// Get environment variables
-	pbURL := os.Getenv("PB_URL")
-	pbEmail := os.Getenv("PB_EMAIL")
-	pbPassword := os.Getenv("PB_PASSWORD")
-
-	// Validate environment variables
-	if pbURL == "" || pbEmail == "" || pbPassword == "" {
-		log.Fatal("Missing required environment variables: PB_URL, PB_EMAIL, PB_PASSWORD")
-	}
-
-	// Ensure URL doesn't end with a slash
-	if pbURL[len(pbURL)-1] == '/' {
-		pbURL = pbURL[:len(pbURL)-1]
-	}
-
-	// Authenticate with PocketBase
-	token, err := authenticate(pbURL, pbEmail, pbPassword)
+	// Initialize the database manager
+	manager, err := db.InitManager()
 	if err != nil {
-		log.Fatalf("Authentication failed: %v", err)
+		log.Fatal("Failed to initialize database manager", "error", err)
 	}
-	log.Println("Authentication successful")
+	log.Info("Authentication successful")
 
 	// Check if collection exists
-	exists, err := collectionExists(pbURL, token, "coach")
+	exists, err := collectionExists(manager, "coach")
 	if err != nil {
-		log.Fatalf("Failed to check if collection exists: %v", err)
+		log.Fatal("Failed to check if collection exists", "error", err)
 	}
 
 	if exists {
-		log.Println("Collection 'coach' already exists")
+		log.Info("Collection 'coach' already exists")
 		return
 	}
 
 	// Create the collection
-	err = createCollection(pbURL, token)
+	err = createCollection(manager)
 	if err != nil {
-		log.Fatalf("Failed to create collection: %v", err)
+		log.Fatal("Failed to create collection", "error", err)
 	}
-	log.Println("Collection 'coach' created successfully")
-}
-
-// authenticate logs in to PocketBase and returns an auth token
-func authenticate(baseURL, email, password string) (string, error) {
-	data := map[string]string{
-		"identity": email,
-		"password": password,
-	}
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return "", err
-	}
-
-	resp, err := http.Post(baseURL+loginEndpoint, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		var errResp ErrorResponse
-		if err := json.Unmarshal(body, &errResp); err != nil {
-			return "", fmt.Errorf("authentication failed with status %d: %s", resp.StatusCode, string(body))
-		}
-		return "", fmt.Errorf("authentication failed: %s", errResp.Message)
-	}
-
-	var authResp AuthResponse
-	if err := json.Unmarshal(body, &authResp); err != nil {
-		return "", err
-	}
-
-	return authResp.Token, nil
+	log.Info("Collection 'coach' created successfully")
 }
 
 // collectionExists checks if a collection with the given name exists
-func collectionExists(baseURL, token, name string) (bool, error) {
-	req, err := http.NewRequest("GET", baseURL+collectionsEndpoint, nil)
+func collectionExists(manager *db.Manager, name string) (bool, error) {
+	req, err := http.NewRequest("GET", manager.BaseURL+collectionsEndpoint, nil)
 	if err != nil {
 		return false, err
 	}
-	req.Header.Set("Authorization", token)
+	req.Header.Set("Authorization", manager.AuthToken)
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := manager.Client.Do(req)
 	if err != nil {
 		return false, err
 	}
@@ -158,7 +92,7 @@ func collectionExists(baseURL, token, name string) (bool, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		var errResp ErrorResponse
+		var errResp db.ErrorResponse
 		if err := json.Unmarshal(body, &errResp); err != nil {
 			return false, fmt.Errorf("failed to list collections with status %d: %s", resp.StatusCode, string(body))
 		}
@@ -180,7 +114,7 @@ func collectionExists(baseURL, token, name string) (bool, error) {
 }
 
 // createCollection creates a new collection with the specified schema
-func createCollection(baseURL, token string) error {
+func createCollection(manager *db.Manager) error {
 	collection := Collection{
 		Name: "coach",
 		Type: "base",
@@ -212,15 +146,14 @@ func createCollection(baseURL, token string) error {
 		return err
 	}
 
-	req, err := http.NewRequest("POST", baseURL+collectionsEndpoint, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", manager.BaseURL+collectionsEndpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", token)
+	req.Header.Set("Authorization", manager.AuthToken)
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := manager.Client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -232,7 +165,7 @@ func createCollection(baseURL, token string) error {
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		var errResp ErrorResponse
+		var errResp db.ErrorResponse
 		if err := json.Unmarshal(body, &errResp); err != nil {
 			return fmt.Errorf("failed to create collection with status %d: %s", resp.StatusCode, string(body))
 		}
