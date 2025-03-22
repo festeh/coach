@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"net/http"
 	"time"
 
@@ -17,9 +18,13 @@ import (
 // @description     API for the coaching and focus management service
 // @BasePath        /
 
-const port = ":8080"
+var port string
 
 func main() {
+	// Parse command line flags
+	flag.StringVar(&port, "port", ":8080", "HTTP server port (e.g. ':8080')")
+	flag.Parse()
+
 	log.SetTimeFormat(time.Stamp)
 	log.SetReportCaller(true)
 
