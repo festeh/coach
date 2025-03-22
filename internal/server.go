@@ -3,6 +3,8 @@ package coach
 import (
 	"net/http"
 	"github.com/gorilla/websocket"
+	
+	"coach/internal/db"
 )
 
 // Server encapsulates all the state and handlers for the coach application
@@ -35,6 +37,15 @@ func NewServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Initialize database manager
+	dbManager, err := db.InitManager()
+	if err != nil {
+		return nil, err
+	}
+
+	// Add database hook to record focus state changes
+	server.State.AddHook(DatabaseHook(dbManager))
 
 	return server, nil
 }
