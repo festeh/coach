@@ -97,13 +97,11 @@ func (m *Manager) GetTodayFocusCount() (int, error) {
 		return 0, fmt.Errorf("failed to parse URL: %w", err)
 	}
 
-	// Add query parameters
 	q := u.Query()
-	filter := fmt.Sprintf("(timestamp >= '%sT00:00:00.000Z')", today)
+	filter := fmt.Sprintf("timestamp > '%sT00:00:00.000Z'", today)
 	q.Set("filter", filter)
 	u.RawQuery = q.Encode()
 
-	// Now use the properly encoded URL
 	req, err := http.NewRequest("GET", u.String(), nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create request: %w", err)
@@ -133,6 +131,8 @@ func (m *Manager) GetTodayFocusCount() (int, error) {
 	var result struct {
 		TotalItems int `json:"totalItems"`
 	}
+
+	log.Info("", "body", string(body))
 
 	if err := json.Unmarshal(body, &result); err != nil {
 		return 0, fmt.Errorf("failed to parse response: %w", err)
