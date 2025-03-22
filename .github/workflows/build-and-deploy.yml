@@ -51,6 +51,20 @@ jobs:
         source: "assets/quotes.txt"
         target: ${{ env.DEPLOY_PATH }}  
 
+    - name: Create .env file
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.HOST }}
+        username: root
+        key: ${{ secrets.SSH_KEY }}
+        script: |
+          cat > ${{ env.DEPLOY_PATH }}/.env << EOF
+          PB_URL=${{ secrets.PB_URL }}
+          PB_EMAIL=${{ secrets.PB_EMAIL }}
+          PB_PASSWORD=${{ secrets.PB_PASSWORD }}
+          EOF
+          chmod 600 ${{ env.DEPLOY_PATH }}/.env
+
     - name: Execute remote commands
       uses: appleboy/ssh-action@master
       with:
@@ -58,7 +72,7 @@ jobs:
         username: root
         key: ${{ secrets.SSH_KEY }}
         script: |
-          chmod +x /root/coach_main/coach
+          chmod +x ${{ env.DEPLOY_PATH }}/coach
           if systemctl is-enabled coach.service; then
             systemctl reload coach.service || systemctl restart coach.service
             echo "Coach service reloaded/restarted successfully"
