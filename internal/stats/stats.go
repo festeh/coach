@@ -21,7 +21,7 @@ func (s *Stats) BumpTodaysFocusCount() {
 	s.focusingByDay[s.getToday()]++
 }
 
-func NewStats(manager *db.Manager) (*Stats, error) {
+func New(manager *db.Manager) (*Stats, error) {
 	stats := &Stats{
 		focusingByDay: make(map[string]int),
 	}

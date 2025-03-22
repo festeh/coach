@@ -2,9 +2,11 @@ package coach
 
 import (
 	"net/http"
+
 	"github.com/gorilla/websocket"
-	
+
 	"coach/internal/db"
+	"coach/internal/stats"
 )
 
 // Server encapsulates all the state and handlers for the coach application
@@ -28,12 +30,7 @@ func NewServer() (*Server, error) {
 		},
 	}
 
-	err := server.State.Load()
-	if err != nil {
-		return nil, err
-	}
-
-	err = server.QuoteStore.Load()
+	err := server.QuoteStore.Load()
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +41,12 @@ func NewServer() (*Server, error) {
 		return nil, err
 	}
 
-	// Add database hook to record focus state changes
+	stats, err := stats.New(dbManager)
+	if err != nil {
+		return nil, err
+	}
+
+	server.State.stats = stats
 	server.State.AddHook(DatabaseHook(dbManager))
 
 	return server, nil
@@ -56,7 +58,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/health", s.HealthHandler)
 	mux.HandleFunc("/focusing", s.FocusHandler)
 	mux.HandleFunc("/connect", s.WebsocketHandler)
-	
+
 	return mux
 }
 
@@ -69,6 +71,6 @@ func (s *Server) BroadcastQuote() {
 		Event: "quote",
 		Quote: s.QuoteStore.GetQuote().Text,
 	}
-	
+
 	s.State.NotifyAllClients(message)
 }

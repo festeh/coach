@@ -75,8 +75,8 @@ func (s *Server) FocusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Info("Focus parameters", "duration", durationInt)
 
-	// Update the focus state, broadcast changes, and schedule reset if needed
-	message := s.State.HandleFocusChange(focusing, durationInt, s)
+	s.State.HandleFocusChange(focusing, durationInt)
+	message := s.State.GetCurrentFocusInfo()
 
 	// Return the updated focus state
 	jsonMessage, err := json.Marshal(message)
@@ -107,7 +107,7 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.State.AddClient(conn)
-	
+
 	message := s.State.GetCurrentFocusInfo()
 	if err := s.State.NotifySingleClient(conn, message); err != nil {
 		log.Error("Failed to send initial focus state to client", "err", err)
@@ -129,8 +129,8 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 			s.BroadcastQuote()
 		}
 		if string(p) == "get_focusing" {
-      message := s.State.GetCurrentFocusInfo()
-      s.State.NotifyAllClients(message)
+			message := s.State.GetCurrentFocusInfo()
+			s.State.NotifyAllClients(message)
 		}
 	}
 }

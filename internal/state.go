@@ -1,13 +1,15 @@
 package coach
 
 import (
+	"coach/internal/stats"
 	"encoding/json"
-	"github.com/charmbracelet/log"
-	"os"
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/log"
+
 	"github.com/gorilla/websocket"
+	"slices"
 )
 
 type FocusRequest struct {
@@ -15,21 +17,15 @@ type FocusRequest struct {
 	EndTime   time.Time
 }
 
-type InternalState struct {
-	IsFocusing bool `json:"is_focusing"`
-	// last time the focusing was changed
-	LastChange time.Time `json:"changed_at"`
-	// duration of the focus time left
-	Duration time.Duration `json:"duration"`
-}
-
-
 type State struct {
-	internal      InternalState
+	IsFocusing bool
+	LastChange time.Time
+
 	clients       map[*websocket.Conn]bool
 	focusRequests []FocusRequest
 	hooks         []Hook
 	mu            sync.Mutex
+	stats         *stats.Stats
 }
 
 type FocusInfo struct {
@@ -37,22 +33,20 @@ type FocusInfo struct {
 	Focusing        bool          `json:"focusing"`
 	SinceLastChange time.Duration `json:"since_last_change"`
 	FocusTimeLeft   time.Duration `json:"focus_time_left"`
+	NumFocuses      int           `json:"num_focuses"`
 }
 
-func GetFocusInfo(s *InternalState) FocusInfo {
-	focusTimeLeft := time.Duration(0)
+func (s *State) GetCurrentFocusInfo() FocusInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	focusTimeLeft := s.GetTimeLeft()
 	sinceLastChange := time.Since(s.LastChange)
-	if s.IsFocusing {
-		focusTimeLeft = s.Duration - sinceLastChange
-	}
-	if focusTimeLeft < 0 {
-		focusTimeLeft = time.Duration(0)
-	}
 	return FocusInfo{
 		Type:            "focusing",
 		Focusing:        s.IsFocusing,
 		SinceLastChange: sinceLastChange / time.Second,
 		FocusTimeLeft:   focusTimeLeft / time.Second,
+		NumFocuses:      s.stats.GetTodayFocusCount(),
 	}
 }
 
@@ -65,19 +59,18 @@ func (s *State) AddHook(hook Hook) {
 
 func (s *State) SetFocusing(duration time.Duration) {
 	s.mu.Lock()
-	s.internal.IsFocusing = true
-	s.internal.Duration = duration
-	s.internal.LastChange = time.Now()
+	s.IsFocusing = true
+	s.LastChange = time.Now()
 	s.focusRequests = append(s.focusRequests, FocusRequest{
-		StartTime: s.internal.LastChange,
-		EndTime:   s.internal.LastChange.Add(duration),
+		StartTime: s.LastChange,
+		EndTime:   s.LastChange.Add(duration),
 	})
-	
+
 	// Get a copy of hooks to execute outside the lock
 	hooks := make([]Hook, len(s.hooks))
 	copy(hooks, s.hooks)
 	s.mu.Unlock()
-	
+
 	// Execute hooks outside the lock to prevent deadlocks
 	for _, hook := range hooks {
 		hook(s)
@@ -86,23 +79,12 @@ func (s *State) SetFocusing(duration time.Duration) {
 
 func (s *State) SetUnfocusing() {
 	s.mu.Lock()
-	s.internal.IsFocusing = false
-	s.internal.LastChange = time.Now()
-	
-	// Get a copy of hooks to execute outside the lock
-	hooks := make([]Hook, len(s.hooks))
-	copy(hooks, s.hooks)
-	s.mu.Unlock()
-	
-	// Execute hooks outside the lock to prevent deadlocks
-	for _, hook := range hooks {
-		hook(s)
-	}
+	defer s.mu.Unlock()
+	s.IsFocusing = false
+	s.LastChange = time.Now()
 }
 
-// HandleFocusChange processes a focus state change request
-// It returns the updated focus info, broadcasts the change, and schedules auto-reset if needed
-func (s *State) HandleFocusChange(focusing bool, durationSeconds int, server *Server) FocusInfo {
+func (s *State) HandleFocusChange(focusing bool, durationSeconds int) {
 	focusDuration := time.Duration(durationSeconds) * time.Second
 
 	if focusing {
@@ -115,8 +97,8 @@ func (s *State) HandleFocusChange(focusing bool, durationSeconds int, server *Se
 			s.mu.Lock()
 			// Remove expired focus request
 			for i := 0; i < len(s.focusRequests); i++ {
-				if s.focusRequests[i].EndTime.Before(time.Now()) || s.focusRequests[i].EndTime.Equal(time.Now()) {
-					s.focusRequests = append(s.focusRequests[:i], s.focusRequests[i+1:]...)
+				if s.focusRequests[i].EndTime.Before(time.Now()) {
+					s.focusRequests = slices.Delete(s.focusRequests, i, i+1)
 					i-- // Adjust index after removal
 				}
 			}
@@ -134,97 +116,25 @@ func (s *State) HandleFocusChange(focusing bool, durationSeconds int, server *Se
 			}
 		}()
 	} else {
-		// If explicitly unfocusing, clear all focus requests
 		s.mu.Lock()
 		s.focusRequests = nil
 		s.mu.Unlock()
-
 		s.SetUnfocusing()
 	}
 
-	// Broadcast the new focus state to all connected clients
 	message := s.GetCurrentFocusInfo()
 	go s.NotifyAllClients(message)
-
-	// Get the updated focus info
-	s.mu.Lock()
-	info := GetFocusInfo(&s.internal)
-	s.mu.Unlock()
-
-	return info
 }
 
-// GetCurrentFocusInfo returns the current focus state information
-func (s *State) GetCurrentFocusInfo() FocusInfo {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Clean up expired focus requests
+func (s *State) GetTimeLeft() time.Duration {
 	now := time.Now()
-	activeRequests := []FocusRequest{}
-	for _, req := range s.focusRequests {
-		if req.EndTime.After(now) {
-			activeRequests = append(activeRequests, req)
-		}
-	}
-	s.focusRequests = activeRequests
-
-	// Find the latest end time among active requests
-	var latestEndTime time.Time
+	latestEndTime := now
 	for _, req := range s.focusRequests {
 		if req.EndTime.After(latestEndTime) {
 			latestEndTime = req.EndTime
 		}
 	}
-
-	// Update duration if we have active requests
-	if len(s.focusRequests) > 0 && s.internal.IsFocusing {
-		s.internal.Duration = latestEndTime.Sub(s.internal.LastChange)
-	}
-
-	return GetFocusInfo(&s.internal)
-}
-
-func (s *State) Focusing() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.internal.IsFocusing
-}
-
-func (s *State) Save() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.save()
-}
-
-func (s *State) Load() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, err := os.Stat(stateFile); os.IsNotExist(err) {
-		s.internal.IsFocusing = false
-		return s.save()
-	}
-
-	data, err := os.ReadFile(stateFile)
-	if err != nil {
-		return err
-	}
-
-	s.internal.LastChange = time.Now()
-	return json.Unmarshal(data, &s.internal)
-}
-
-// save is an internal method that saves the state without acquiring the mutex
-const stateFile = "state.json"
-
-func (s *State) save() error {
-	data, err := json.Marshal(&s.internal)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(stateFile, data, 0644)
+	return latestEndTime.Sub(now)
 }
 
 func (s *State) AddClient(client *websocket.Conn) {
