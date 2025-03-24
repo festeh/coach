@@ -66,7 +66,7 @@ func (s *State) SetFocusing(duration time.Duration) {
 		EndTime:   s.LastChange.Add(duration),
 	})
 
-  s.stats.BumpTodaysFocusCount()
+	s.stats.BumpTodaysFocusCount()
 
 	// Get a copy of hooks to execute outside the lock
 	hooks := make([]Hook, len(s.hooks))
@@ -77,7 +77,6 @@ func (s *State) SetFocusing(duration time.Duration) {
 	for _, hook := range hooks {
 		hook(s)
 	}
-
 
 }
 

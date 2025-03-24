@@ -2,6 +2,7 @@ package coach
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -19,7 +20,10 @@ type Server struct {
 // NewServer creates and initializes a new server instance
 func NewServer() (*Server, error) {
 	server := &Server{
-		State:      &State{},
+		State: &State{
+			IsFocusing: false,
+			LastChange: time.Now(),
+		},
 		QuoteStore: &QuoteStore{},
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,

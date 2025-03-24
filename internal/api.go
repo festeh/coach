@@ -2,7 +2,6 @@ package coach
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/charmbracelet/log"
 	"net/http"
 	"strconv"
@@ -119,23 +118,20 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	for {
-		messageType, p, err := conn.ReadMessage()
+		_, buf, err := conn.ReadMessage()
 		if err != nil {
 			log.Error("Error reading message", "err", err)
 			return
 		}
 
-		// Try to parse the message as JSON
 		var message struct {
 			Type     string `json:"type"`
 			Duration int    `json:"duration,omitempty"`
 		}
 
-		if err := json.Unmarshal(p, &message); err != nil {
-			log.Warn("Failed to parse message as JSON", "message", string(p), "err", err)
+		if err := json.Unmarshal(buf, &message); err != nil {
 			continue
 		}
-
 		log.Debug("Received message", "type", message.Type)
 
 		switch message.Type {
