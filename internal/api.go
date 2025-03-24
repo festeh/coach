@@ -132,5 +132,8 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 			message := s.State.GetCurrentFocusInfo()
 			s.State.NotifyAllClients(message)
 		}
+    if string(p) == "focus" {
+      s.State.HandleFocusChange(true, 30 * 60)
+    }
 	}
 }
