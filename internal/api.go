@@ -120,20 +120,38 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 
 	for {
 		messageType, p, err := conn.ReadMessage()
-		fmt.Println(messageType, string(p), err)
 		if err != nil {
-			log.Error(err)
+			log.Error("Error reading message", "err", err)
 			return
 		}
-		if string(p) == "get_quote" {
+
+		// Try to parse the message as JSON
+		var message struct {
+			Type     string `json:"type"`
+			Duration int    `json:"duration,omitempty"`
+		}
+
+		if err := json.Unmarshal(p, &message); err != nil {
+			log.Warn("Failed to parse message as JSON", "message", string(p), "err", err)
+			continue
+		}
+
+		log.Debug("Received message", "type", message.Type)
+
+		switch message.Type {
+		case "get_quote":
 			s.BroadcastQuote()
+		case "get_focusing":
+			focusInfo := s.State.GetCurrentFocusInfo()
+			s.State.NotifyAllClients(focusInfo)
+		case "focus":
+			duration := 30 * 60 // default 30 minutes
+			if message.Duration > 0 {
+				duration = message.Duration
+			}
+			s.State.HandleFocusChange(true, duration)
+		default:
+			log.Warn("Unknown message type", "type", message.Type)
 		}
-		if string(p) == "get_focusing" {
-			message := s.State.GetCurrentFocusInfo()
-			s.State.NotifyAllClients(message)
-		}
-    if string(p) == "focus" {
-      s.State.HandleFocusChange(true, 30 * 60)
-    }
 	}
 }
