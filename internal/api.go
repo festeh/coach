@@ -2,9 +2,11 @@ package coach
 
 import (
 	"encoding/json"
-	"github.com/charmbracelet/log"
 	"net/http"
 	"strconv"
+
+	"github.com/charmbracelet/log"
+	"github.com/gorilla/websocket"
 )
 
 // @Summary Health check endpoint
@@ -146,6 +148,24 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 				duration = message.Duration
 			}
 			s.State.HandleFocusChange(true, duration)
+		case "ping":
+			response := struct {
+				Response string `json:"response"`
+			}{
+				Response: "pong",
+			}
+
+			jsonResponse, err := json.Marshal(response)
+			if err != nil {
+				log.Error("Error marshaling response", "err", err)
+				return
+			}
+
+			err = conn.WriteMessage(websocket.TextMessage, jsonResponse)
+			if err != nil {
+				log.Error("Error sending response", "err", err)
+				return
+			}
 		default:
 			log.Warn("Unknown message type", "type", message.Type)
 		}
