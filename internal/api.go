@@ -141,7 +141,9 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 			s.BroadcastQuote()
 		case "get_focusing":
 			focusInfo := s.State.GetCurrentFocusInfo()
-			s.State.NotifyAllClients(focusInfo)
+			if err := s.State.NotifySingleClient(conn, focusInfo); err != nil {
+				log.Error("Failed to send focus state to client", "err", err)
+			}
 		case "focus":
 			duration := 30 * 60 // default 30 minutes
 			if message.Duration > 0 {
