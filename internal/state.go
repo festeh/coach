@@ -41,12 +41,16 @@ func (s *State) GetCurrentFocusInfo() FocusInfo {
 	defer s.mu.Unlock()
 	focusTimeLeft := s.GetTimeLeft()
 	sinceLastChange := time.Since(s.LastChange)
+	numFocuses := 0
+	if s.stats != nil {
+		numFocuses = s.stats.GetTodayFocusCount()
+	}
 	return FocusInfo{
 		Type:            "focusing",
 		Focusing:        s.IsFocusing,
 		SinceLastChange: sinceLastChange / time.Second,
 		FocusTimeLeft:   focusTimeLeft / time.Second,
-		NumFocuses:      s.stats.GetTodayFocusCount(),
+		NumFocuses:      numFocuses,
 	}
 }
 
@@ -61,12 +65,24 @@ func (s *State) SetFocusing(duration time.Duration) {
 	s.mu.Lock()
 	s.IsFocusing = true
 	s.LastChange = time.Now()
+
+	// Find the latest EndTime from existing focus requests
+	latestEndTime := s.LastChange // Default to now if no existing requests
+	for _, req := range s.focusRequests {
+		if req.EndTime.After(latestEndTime) {
+			latestEndTime = req.EndTime
+		}
+	}
+
+	// Add new focus period starting from the latest end time
 	s.focusRequests = append(s.focusRequests, FocusRequest{
-		StartTime: s.LastChange,
-		EndTime:   s.LastChange.Add(duration),
+		StartTime: latestEndTime,
+		EndTime:   latestEndTime.Add(duration),
 	})
 
-	s.stats.BumpTodaysFocusCount()
+	if s.stats != nil {
+		s.stats.BumpTodaysFocusCount()
+	}
 
 	// Get a copy of hooks to execute outside the lock
 	hooks := make([]Hook, len(s.hooks))
@@ -130,6 +146,9 @@ func (s *State) HandleFocusChange(focusing bool, durationSeconds int) {
 }
 
 func (s *State) GetTimeLeft() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	now := time.Now()
 	latestEndTime := now
 	for _, req := range s.focusRequests {
