@@ -39,7 +39,7 @@ type FocusInfo struct {
 func (s *State) GetCurrentFocusInfo() FocusInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	focusTimeLeft := s.GetTimeLeft()
+	focusTimeLeft := s.getTimeLeftLocked()
 	sinceLastChange := time.Since(s.LastChange)
 	numFocuses := 0
 	if s.stats != nil {
@@ -145,10 +145,8 @@ func (s *State) HandleFocusChange(focusing bool, durationSeconds int) {
 	go s.NotifyAllClients(message)
 }
 
-func (s *State) GetTimeLeft() time.Duration {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+// getTimeLeftLocked calculates remaining focus time. Must be called with mutex held.
+func (s *State) getTimeLeftLocked() time.Duration {
 	now := time.Now()
 	latestEndTime := now
 	for _, req := range s.focusRequests {
@@ -157,6 +155,13 @@ func (s *State) GetTimeLeft() time.Duration {
 		}
 	}
 	return latestEndTime.Sub(now)
+}
+
+// GetTimeLeft returns the remaining focus time (thread-safe)
+func (s *State) GetTimeLeft() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.getTimeLeftLocked()
 }
 
 func (s *State) AddClient(client *websocket.Conn) {
