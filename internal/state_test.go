@@ -125,3 +125,34 @@ func TestTimeLeftWithNoFocusRequests(t *testing.T) {
 		t.Errorf("Expected 0 time left with no requests, got %v", timeLeft)
 	}
 }
+
+// TestIsFocusingDerived tests that IsFocusing is correctly derived from focus requests
+func TestIsFocusingDerived(t *testing.T) {
+	state := &State{}
+
+	// Initially not focusing (no requests)
+	if state.IsFocusing() {
+		t.Error("Expected IsFocusing() to be false with no requests")
+	}
+
+	// Add a focus request
+	state.SetFocusing(30 * time.Second)
+
+	// Should now be focusing
+	if !state.IsFocusing() {
+		t.Error("Expected IsFocusing() to be true with active request")
+	}
+
+	// Wait for request to expire
+	time.Sleep(31 * time.Second)
+
+	// Should automatically not be focusing (request expired)
+	if state.IsFocusing() {
+		t.Error("Expected IsFocusing() to be false after request expired")
+	}
+
+	// Verify time left is also 0
+	if state.GetTimeLeft() != 0 {
+		t.Errorf("Expected 0 time left after expiration, got %v", state.GetTimeLeft())
+	}
+}

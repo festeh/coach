@@ -18,7 +18,6 @@ type FocusRequest struct {
 }
 
 type State struct {
-	IsFocusing bool
 	LastChange time.Time
 
 	clients       map[*websocket.Conn]bool
@@ -26,6 +25,11 @@ type State struct {
 	hooks         []Hook
 	mu            sync.Mutex
 	stats         *stats.Stats
+}
+
+// IsFocusing returns true if there is remaining focus time (derived from focusRequests)
+func (s *State) IsFocusing() bool {
+	return s.getTimeLeftLocked() > 0
 }
 
 type FocusInfo struct {
@@ -47,7 +51,7 @@ func (s *State) GetCurrentFocusInfo() FocusInfo {
 	}
 	return FocusInfo{
 		Type:            "focusing",
-		Focusing:        s.IsFocusing,
+		Focusing:        s.IsFocusing(),
 		SinceLastChange: sinceLastChange / time.Second,
 		FocusTimeLeft:   focusTimeLeft / time.Second,
 		NumFocuses:      numFocuses,
@@ -63,7 +67,6 @@ func (s *State) AddHook(hook Hook) {
 
 func (s *State) SetFocusing(duration time.Duration) {
 	s.mu.Lock()
-	s.IsFocusing = true
 	s.LastChange = time.Now()
 
 	// Find the latest EndTime from existing focus requests
@@ -96,13 +99,6 @@ func (s *State) SetFocusing(duration time.Duration) {
 
 }
 
-func (s *State) SetUnfocusing() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.IsFocusing = false
-	s.LastChange = time.Now()
-}
-
 func (s *State) HandleFocusChange(focusing bool, durationSeconds int) {
 	focusDuration := time.Duration(durationSeconds) * time.Second
 
@@ -122,12 +118,14 @@ func (s *State) HandleFocusChange(focusing bool, durationSeconds int) {
 				}
 			}
 
-			shouldUnfocus := len(s.focusRequests) == 0
+			shouldNotify := len(s.focusRequests) == 0
+			if shouldNotify {
+				s.LastChange = time.Now()
+			}
 			s.mu.Unlock()
 
-			if shouldUnfocus {
-				log.Info("All focus periods expired, unfocusing", "duration", durationSeconds)
-				s.SetUnfocusing()
+			if shouldNotify {
+				log.Info("All focus periods expired", "duration", durationSeconds)
 				message := s.GetCurrentFocusInfo()
 				go s.NotifyAllClients(message)
 			} else {
@@ -135,10 +133,11 @@ func (s *State) HandleFocusChange(focusing bool, durationSeconds int) {
 			}
 		}()
 	} else {
+		// Explicit unfocus - clear all requests
 		s.mu.Lock()
 		s.focusRequests = nil
+		s.LastChange = time.Now()
 		s.mu.Unlock()
-		s.SetUnfocusing()
 	}
 
 	message := s.GetCurrentFocusInfo()

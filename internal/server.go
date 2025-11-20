@@ -21,7 +21,6 @@ type Server struct {
 func NewServer() (*Server, error) {
 	server := &Server{
 		State: &State{
-			IsFocusing: false,
 			LastChange: time.Now(),
 		},
 		QuoteStore: &QuoteStore{},
