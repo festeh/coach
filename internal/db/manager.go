@@ -217,7 +217,8 @@ func (m *Manager) GetFocusHistory(days int) ([]FocusRecord, error) {
 	// Convert to FocusRecord slice
 	records := make([]FocusRecord, 0, len(result.Items))
 	for _, item := range result.Items {
-		ts, err := time.Parse(time.RFC3339, item.Timestamp)
+		// PocketBase uses "2006-01-02 15:04:05.000Z" format
+		ts, err := time.Parse("2006-01-02 15:04:05.000Z", item.Timestamp)
 		if err != nil {
 			log.Warn("Failed to parse timestamp", "timestamp", item.Timestamp, "error", err)
 			continue
