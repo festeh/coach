@@ -35,6 +35,12 @@ type ErrorResponse struct {
 	Data    any    `json:"data"`
 }
 
+// FocusRecord represents a focus session record
+type FocusRecord struct {
+	Timestamp time.Time `json:"timestamp"`
+	Duration  int       `json:"duration"`
+}
+
 // Manager handles database operations and authentication
 type Manager struct {
 	BaseURL   string
@@ -145,6 +151,85 @@ func (m *Manager) GetTodayFocusCount() (int, error) {
 
 	log.Info("Found focus sessions", "count", result.TotalItems)
 	return result.TotalItems, nil
+}
+
+// GetFocusHistory returns focus records for the last N days
+func (m *Manager) GetFocusHistory(days int) ([]FocusRecord, error) {
+	log.Info("Getting focus history", "days", days)
+
+	// Calculate the start date
+	startDate := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
+
+	baseEndpoint := fmt.Sprintf("%s/api/collections/coach/records", m.BaseURL)
+	u, err := url.Parse(baseEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse URL: %w", err)
+	}
+
+	q := u.Query()
+	filter := fmt.Sprintf("timestamp >= '%s 00:00:00'", startDate)
+	q.Set("filter", filter)
+	q.Set("sort", "-timestamp")
+	q.Set("perPage", "500") // Get up to 500 records
+	u.RawQuery = q.Encode()
+
+	fullURL := u.String()
+
+	req, err := http.NewRequest("GET", fullURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", m.AuthToken)
+
+	resp, err := m.Client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp ErrorResponse
+		if err := json.Unmarshal(body, &errResp); err != nil {
+			return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+		}
+		return nil, fmt.Errorf("request failed: %s", errResp.Message)
+	}
+
+	var result struct {
+		Items []struct {
+			ID        string `json:"id"`
+			Timestamp string `json:"timestamp"`
+			Duration  int    `json:"duration"`
+		} `json:"items"`
+		TotalItems int `json:"totalItems"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	// Convert to FocusRecord slice
+	records := make([]FocusRecord, 0, len(result.Items))
+	for _, item := range result.Items {
+		ts, err := time.Parse(time.RFC3339, item.Timestamp)
+		if err != nil {
+			log.Warn("Failed to parse timestamp", "timestamp", item.Timestamp, "error", err)
+			continue
+		}
+		records = append(records, FocusRecord{
+			Timestamp: ts,
+			Duration:  item.Duration,
+		})
+	}
+
+	log.Info("Found focus records", "count", len(records))
+	return records, nil
 }
 
 func (m *Manager) AddRecord(data map[string]any) error {

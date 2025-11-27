@@ -14,6 +14,7 @@ import (
 type Server struct {
 	State      *State
 	QuoteStore *QuoteStore
+	DBManager  *db.Manager
 	upgrader   websocket.Upgrader
 }
 
@@ -51,6 +52,7 @@ func NewServer() (*Server, error) {
 
 	server.State.stats = stats
 	server.State.AddHook(DatabaseHook(dbManager))
+	server.DBManager = dbManager
 
 	return server, nil
 }
@@ -60,6 +62,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.HealthHandler)
 	mux.HandleFunc("/focusing", s.FocusHandler)
+	mux.HandleFunc("/history", s.HistoryHandler)
 	mux.HandleFunc("/connect", s.WebsocketHandler)
 
 	return mux

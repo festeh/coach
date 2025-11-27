@@ -91,6 +91,55 @@ func (s *Server) FocusHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(jsonMessage)
 }
 
+// @Summary Get focus history
+// @Description Returns focus records for the last N days
+// @Tags focus
+// @Produce json
+// @Param days query int false "Number of days to look back (default 7)"
+// @Success 200 {array} db.FocusRecord "Array of focus records"
+// @Failure 500 {string} string "Internal server error"
+// @Router /history [get]
+func (s *Server) HistoryHandler(w http.ResponseWriter, r *http.Request) {
+	log.Info("Called /history", "method", r.Method)
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get days parameter with default of 7
+	daysStr := r.URL.Query().Get("days")
+	days := 7
+	if daysStr != "" {
+		var err error
+		days, err = strconv.Atoi(daysStr)
+		if err != nil || days < 1 {
+			days = 7
+		}
+	}
+
+	records, err := s.DBManager.GetFocusHistory(days)
+	if err != nil {
+		log.Error("Failed to get focus history", "err", err)
+		http.Error(w, "Failed to get focus history", http.StatusInternalServerError)
+		return
+	}
+
+	// Add CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+
+	jsonData, err := json.Marshal(records)
+	if err != nil {
+		log.Error("Error marshaling history", "err", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(jsonData)
+}
+
 // @Summary WebSocket connection endpoint
 // @Description Establishes a WebSocket connection for real-time updates
 // @Tags websocket
