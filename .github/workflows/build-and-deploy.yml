@@ -5,7 +5,7 @@ on:
     branches: [ main ]  # Adjust this to your main branch name if different
 
 env:
-  GO_VERSION: 1.23.1
+  GO_VERSION: '1.25'
   APP_NAME: coach
   DEPLOY_PATH: /opt/coach
 
