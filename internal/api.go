@@ -9,6 +9,19 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// writeJSON marshals data to JSON and writes it to the response with proper headers
+func writeJSON(w http.ResponseWriter, data any) error {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		log.Error("Error marshaling JSON", "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonData)
+	return nil
+}
+
 // @Summary Health check endpoint
 // @Description Returns the health status of the API
 // @Tags health
@@ -42,15 +55,7 @@ func (s *Server) FocusHandler(w http.ResponseWriter, r *http.Request) {
 
 	// GET method - return current focus state
 	if r.Method == http.MethodGet {
-		message := s.State.GetCurrentFocusInfo()
-		jsonMessage, err := json.Marshal(message)
-		if err != nil {
-			log.Error("Error marshaling focus state", "err", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(jsonMessage)
+		writeJSON(w, s.State.GetCurrentFocusInfo())
 		return
 	}
 
@@ -78,18 +83,7 @@ func (s *Server) FocusHandler(w http.ResponseWriter, r *http.Request) {
 	log.Info("Focus parameters", "duration", durationInt)
 
 	s.State.HandleFocusChange(focusing, durationInt)
-	message := s.State.GetCurrentFocusInfo()
-
-	// Return the updated focus state
-	jsonMessage, err := json.Marshal(message)
-	if err != nil {
-		log.Error("Error marshaling focus state", "err", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write(jsonMessage)
+	writeJSON(w, s.State.GetCurrentFocusInfo())
 }
 
 // @Summary Get focus history
@@ -126,19 +120,8 @@ func (s *Server) HistoryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Add CORS headers
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Content-Type", "application/json")
-
-	jsonData, err := json.Marshal(records)
-	if err != nil {
-		log.Error("Error marshaling history", "err", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write(jsonData)
+	writeJSON(w, records)
 }
 
 // @Summary WebSocket connection endpoint

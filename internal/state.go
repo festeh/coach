@@ -25,10 +25,21 @@ type State struct {
 	hooks         []Hook
 	mu            sync.Mutex
 	stats         *stats.Stats
+	expiryTimer   *time.Timer
 }
 
-// IsFocusing returns true if there is remaining focus time (derived from focusRequests)
+// NewState creates a properly initialized State instance
+func NewState(s *stats.Stats) *State {
+	return &State{
+		clients: make(map[*websocket.Conn]bool),
+		stats:   s,
+	}
+}
+
+// IsFocusing returns true if there is remaining focus time (thread-safe)
 func (s *State) IsFocusing() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.getTimeLeftLocked() > 0
 }
 
@@ -51,7 +62,7 @@ func (s *State) GetCurrentFocusInfo() FocusInfo {
 	}
 	return FocusInfo{
 		Type:            "focusing",
-		Focusing:        s.IsFocusing(),
+		Focusing:        s.getTimeLeftLocked() > 0,
 		SinceLastChange: sinceLastChange / time.Second,
 		FocusTimeLeft:   focusTimeLeft / time.Second,
 		NumFocuses:      numFocuses,
@@ -70,12 +81,13 @@ func (s *State) SetFocusing(duration time.Duration) {
 
 	// Only update LastChange if we're starting a new focus session
 	// (not already focusing)
-	if !s.IsFocusing() {
+	if s.getTimeLeftLocked() <= 0 {
 		s.LastChange = time.Now()
 	}
 
 	// Find the latest EndTime from existing focus requests
-	latestEndTime := s.LastChange // Default to now if no existing requests
+	now := time.Now()
+	latestEndTime := now
 	for _, req := range s.focusRequests {
 		if req.EndTime.After(latestEndTime) {
 			latestEndTime = req.EndTime
@@ -92,6 +104,9 @@ func (s *State) SetFocusing(duration time.Duration) {
 		s.stats.BumpTodaysFocusCount()
 	}
 
+	// Schedule expiry timer while still holding the lock
+	s.scheduleExpiryTimer()
+
 	// Get a copy of hooks to execute outside the lock
 	hooks := make([]Hook, len(s.hooks))
 	copy(hooks, s.hooks)
@@ -101,48 +116,67 @@ func (s *State) SetFocusing(duration time.Duration) {
 	for _, hook := range hooks {
 		hook(s)
 	}
+}
 
+// scheduleExpiryTimer schedules a single timer for when focus ends. Must be called with mutex held.
+func (s *State) scheduleExpiryTimer() {
+	// Cancel existing timer if any
+	if s.expiryTimer != nil {
+		s.expiryTimer.Stop()
+		s.expiryTimer = nil
+	}
+
+	// Find the latest end time
+	timeLeft := s.getTimeLeftLocked()
+	if timeLeft <= 0 {
+		return
+	}
+
+	s.expiryTimer = time.AfterFunc(timeLeft, func() {
+		s.mu.Lock()
+		// Remove all expired focus requests
+		now := time.Now()
+		for i := 0; i < len(s.focusRequests); i++ {
+			if s.focusRequests[i].EndTime.Before(now) {
+				s.focusRequests = slices.Delete(s.focusRequests, i, i+1)
+				i--
+			}
+		}
+
+		// Check if all focus periods have ended
+		if len(s.focusRequests) == 0 {
+			s.LastChange = now
+			s.expiryTimer = nil
+			s.mu.Unlock()
+
+			log.Info("All focus periods expired")
+			message := s.GetCurrentFocusInfo()
+			go s.NotifyAllClients(message)
+		} else {
+			// Reschedule for remaining focus periods
+			s.scheduleExpiryTimer()
+			s.mu.Unlock()
+		}
+	})
+}
+
+// clearFocus cancels all focus requests and the expiry timer
+func (s *State) clearFocus() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.expiryTimer != nil {
+		s.expiryTimer.Stop()
+		s.expiryTimer = nil
+	}
+	s.focusRequests = nil
+	s.LastChange = time.Now()
 }
 
 func (s *State) HandleFocusChange(focusing bool, durationSeconds int) {
-	focusDuration := time.Duration(durationSeconds) * time.Second
-
 	if focusing {
-		s.SetFocusing(focusDuration)
-
-		// Schedule auto-reset if focusing
-		go func() {
-			time.Sleep(focusDuration)
-
-			s.mu.Lock()
-			// Remove expired focus request
-			for i := 0; i < len(s.focusRequests); i++ {
-				if s.focusRequests[i].EndTime.Before(time.Now()) {
-					s.focusRequests = slices.Delete(s.focusRequests, i, i+1)
-					i-- // Adjust index after removal
-				}
-			}
-
-			shouldNotify := len(s.focusRequests) == 0
-			if shouldNotify {
-				s.LastChange = time.Now()
-			}
-			s.mu.Unlock()
-
-			if shouldNotify {
-				log.Info("All focus periods expired", "duration", durationSeconds)
-				message := s.GetCurrentFocusInfo()
-				go s.NotifyAllClients(message)
-			} else {
-				log.Info("Focus period expired but other active focus periods remain")
-			}
-		}()
+		s.SetFocusing(time.Duration(durationSeconds) * time.Second)
 	} else {
-		// Explicit unfocus - clear all requests
-		s.mu.Lock()
-		s.focusRequests = nil
-		s.LastChange = time.Now()
-		s.mu.Unlock()
+		s.clearFocus()
 	}
 
 	message := s.GetCurrentFocusInfo()
