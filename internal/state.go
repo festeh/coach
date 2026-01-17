@@ -67,7 +67,12 @@ func (s *State) AddHook(hook Hook) {
 
 func (s *State) SetFocusing(duration time.Duration) {
 	s.mu.Lock()
-	s.LastChange = time.Now()
+
+	// Only update LastChange if we're starting a new focus session
+	// (not already focusing)
+	if !s.IsFocusing() {
+		s.LastChange = time.Now()
+	}
 
 	// Find the latest EndTime from existing focus requests
 	latestEndTime := s.LastChange // Default to now if no existing requests
