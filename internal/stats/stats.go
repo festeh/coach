@@ -2,10 +2,12 @@ package stats
 
 import (
 	"coach/internal/db"
+	"sync"
 	"time"
 )
 
 type Stats struct {
+	mu            sync.Mutex
 	focusingByDay map[string]int
 }
 
@@ -14,10 +16,14 @@ func (s *Stats) getToday() string {
 }
 
 func (s *Stats) GetTodayFocusCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.focusingByDay[s.getToday()]
 }
 
 func (s *Stats) BumpTodaysFocusCount() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.focusingByDay[s.getToday()]++
 }
 

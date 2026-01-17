@@ -202,10 +202,27 @@ func (s *State) NotifySingleClient(client *websocket.Conn, message any) error {
 func (s *State) NotifyAllClients(message any) {
 	s.mu.Lock()
 	log.Info("Notifying all clients", "count", len(s.clients))
-	defer s.mu.Unlock()
+	// Copy clients to avoid holding lock during I/O
+	clients := make([]*websocket.Conn, 0, len(s.clients))
 	for client := range s.clients {
+		clients = append(clients, client)
+	}
+	s.mu.Unlock()
+
+	// Notify clients without holding lock
+	var failedClients []*websocket.Conn
+	for _, client := range clients {
 		if err := s.NotifySingleClient(client, message); err != nil {
+			failedClients = append(failedClients, client)
+		}
+	}
+
+	// Remove failed clients
+	if len(failedClients) > 0 {
+		s.mu.Lock()
+		for _, client := range failedClients {
 			delete(s.clients, client)
 		}
+		s.mu.Unlock()
 	}
 }
