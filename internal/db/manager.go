@@ -46,6 +46,8 @@ type Manager struct {
 	BaseURL   string
 	AuthToken string
 	Client    *http.Client
+	email     string
+	password  string
 }
 
 // InitManager initializes a new database manager
@@ -77,12 +79,14 @@ func InitManager() (*Manager, error) {
 
 	// Create manager
 	manager := &Manager{
-		BaseURL: baseURL,
-		Client:  &http.Client{Timeout: 10 * time.Second},
+		BaseURL:  baseURL,
+		Client:   &http.Client{Timeout: 10 * time.Second},
+		email:    pbEmail,
+		password: pbPassword,
 	}
 
 	// Authenticate
-	token, err := manager.authenticate(pbEmail, pbPassword)
+	token, err := manager.authenticate()
 	if err != nil {
 		return nil, fmt.Errorf("authentication failed: %w", err)
 	}
@@ -234,6 +238,10 @@ func (m *Manager) GetFocusHistory(days int) ([]FocusRecord, error) {
 }
 
 func (m *Manager) AddRecord(data map[string]any) error {
+	return m.addRecordWithRetry(data, true)
+}
+
+func (m *Manager) addRecordWithRetry(data map[string]any, canRetry bool) error {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("failed to marshal record data: %w", err)
@@ -259,6 +267,18 @@ func (m *Manager) AddRecord(data map[string]any) error {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
+	// Handle 401/403 by refreshing token and retrying once
+	if (resp.StatusCode == 401 || resp.StatusCode == 403) && canRetry {
+		log.Info("Auth token expired, refreshing...")
+		token, err := m.authenticate()
+		if err != nil {
+			return fmt.Errorf("failed to refresh token: %w", err)
+		}
+		m.AuthToken = token
+		log.Info("Token refreshed, retrying request")
+		return m.addRecordWithRetry(data, false)
+	}
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var errResp ErrorResponse
 		if err := json.Unmarshal(body, &errResp); err != nil {
@@ -270,10 +290,10 @@ func (m *Manager) AddRecord(data map[string]any) error {
 	return nil
 }
 
-func (m *Manager) authenticate(email, password string) (string, error) {
+func (m *Manager) authenticate() (string, error) {
 	data := map[string]string{
-		"identity": email,
-		"password": password,
+		"identity": m.email,
+		"password": m.password,
 	}
 	jsonData, err := json.Marshal(data)
 	if err != nil {
