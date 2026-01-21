@@ -120,7 +120,6 @@ func (s *Server) HistoryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	writeJSON(w, records)
 }
 
