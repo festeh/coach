@@ -27,7 +27,7 @@ func DatabaseHook(manager *db.Manager) Hook {
 		duration := request.EndTime.Sub(request.StartTime)
 
 		record := map[string]any{
-			"timestamp": time.Now().Format(time.RFC3339),
+			"timestamp": request.StartTime.Format(time.RFC3339),
 			"duration":  int(duration.Seconds()),
 		}
 
