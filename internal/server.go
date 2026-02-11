@@ -80,6 +80,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/focusing", s.FocusHandler)
 	mux.HandleFunc("/history", s.HistoryHandler)
 	mux.HandleFunc("/connect", s.WebsocketHandler)
+	mux.HandleFunc("/admin", s.AdminHandler)
 
 	return corsMiddleware(mux)
 }
