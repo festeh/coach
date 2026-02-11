@@ -8,5 +8,9 @@ coach
 *.test
 *.out
 
+# Secrets
+inventory.ini
+secrets.yml
+
 # Claude Code
 .claude/
