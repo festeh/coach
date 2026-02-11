@@ -1,6 +1,7 @@
 package coach
 
 import (
+	"io/fs"
 	"net/http"
 	"time"
 
@@ -15,16 +16,18 @@ type Server struct {
 	State      *State
 	QuoteStore *QuoteStore
 	DBManager  *db.Manager
+	AdminFS    fs.FS
 	upgrader   websocket.Upgrader
 }
 
 // NewServer creates and initializes a new server instance
-func NewServer() (*Server, error) {
+func NewServer(adminFS fs.FS) (*Server, error) {
 	server := &Server{
 		State: &State{
 			LastChange: time.Now(),
 		},
 		QuoteStore: &QuoteStore{},
+		AdminFS:    adminFS,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -80,7 +83,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/focusing", s.FocusHandler)
 	mux.HandleFunc("/history", s.HistoryHandler)
 	mux.HandleFunc("/connect", s.WebsocketHandler)
-	mux.HandleFunc("/admin", s.AdminHandler)
+	mux.Handle("/admin/", s.AdminHandler())
 
 	return corsMiddleware(mux)
 }

@@ -2,11 +2,13 @@ package main
 
 import (
 	"flag"
+	"io/fs"
 	"net/http"
 	"time"
 
 	"github.com/charmbracelet/log"
 
+	"coach/admin"
 	_ "coach/docs"
 	"coach/internal"
 
@@ -29,7 +31,12 @@ func main() {
 	log.SetReportCaller(true)
 
 	// Create and initialize the server
-	server, err := coach.NewServer()
+	adminFS, err := fs.Sub(admin.Dist, "dist")
+	if err != nil {
+		log.Fatalf("Failed to load admin assets: %v", err)
+	}
+
+	server, err := coach.NewServer(adminFS)
 	if err != nil {
 		log.Fatalf("Failed to initialize server: %v", err)
 	}

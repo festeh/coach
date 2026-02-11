@@ -12,5 +12,9 @@ coach
 inventory.ini
 secrets.yml
 
+# Admin frontend
+admin/dist/
+admin/node_modules/
+
 # Claude Code
 .claude/

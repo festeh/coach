@@ -206,11 +206,8 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) AdminHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(`<!DOCTYPE html>
-<html>
-<head><title>Admin</title></head>
-<body><h1>Admin</h1></body>
-</html>`))
+func (s *Server) AdminHandler() http.Handler {
+	// Serve embedded SPA files from admin/dist, stripping the /admin/ prefix
+	fs := http.FileServerFS(s.AdminFS)
+	return http.StripPrefix("/admin/", fs)
 }
