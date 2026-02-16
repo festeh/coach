@@ -67,7 +67,7 @@
    - **Scenario: Offline / disconnected**
      - **Given:** WebSocket is disconnected
      - **When:** A time segment is finalized
-     - **Then:** Entry is buffered locally and sent when connection is restored
+     - **Then:** Entry is dropped (no offline buffering for now)
 
 ## Requirements
 
@@ -79,8 +79,7 @@
 - [ ] Pause tracking when browser window loses focus
 - [ ] Add `idle` permission to the extension manifest
 - [ ] Send finalized time entries to the server via WebSocket
-- [ ] Buffer unsent entries locally when disconnected
-- [ ] Flush buffered entries when WebSocket reconnects
+- [ ] Drop time entries when WebSocket is disconnected (no offline buffering)
 - [ ] Periodically flush current tracking state to storage (crash safety)
 - [ ] Internal pages (about:, moz-extension:, chrome:) are not tracked
 - [ ] Display flat domain list in popup, sorted by time descending
