@@ -7,6 +7,9 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/charmbracelet/log"
+
+	"coach/internal/ai"
 	"coach/internal/db"
 	"coach/internal/stats"
 )
@@ -16,6 +19,7 @@ type Server struct {
 	State      *State
 	QuoteStore *QuoteStore
 	DBManager  *db.Manager
+	HookRunner *HookRunner
 	AdminFS    fs.FS
 	upgrader   websocket.Upgrader
 }
@@ -57,6 +61,26 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 	server.State.AddHook(DatabaseHook(dbManager))
 	server.DBManager = dbManager
 
+	// Initialize hook runner
+	hookRunner := NewHookRunner(server.State, dbManager)
+	hookRunner.SetServer(server)
+
+	// Register AI hook (only if AI env vars are set)
+	aiClient, err := ai.NewClient()
+	if err != nil {
+		log.Warn("AI client not available, AI hook disabled", "error", err)
+	} else {
+		hookRunner.Register(NewAIHookDef(aiClient))
+	}
+
+	// Load configs from PocketBase (non-fatal if collection doesn't exist yet)
+	if err := hookRunner.LoadConfigs(); err != nil {
+		log.Warn("Failed to load hook configs", "error", err)
+	}
+
+	hookRunner.StartSchedulers()
+	server.HookRunner = hookRunner
+
 	return server, nil
 }
 
@@ -64,7 +88,7 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 		if r.Method == http.MethodOptions {
@@ -83,6 +107,10 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/focusing", s.FocusHandler)
 	mux.HandleFunc("/history", s.HistoryHandler)
 	mux.HandleFunc("/connect", s.WebsocketHandler)
+	mux.HandleFunc("/api/hooks", s.HooksHandler)
+	mux.HandleFunc("/api/hooks/", s.HookByIDHandler)
+	mux.HandleFunc("/api/hook-results", s.HookResultsHandler)
+	mux.HandleFunc("/api/hook-results/", s.HookResultByIDHandler)
 	mux.Handle("/admin/", s.AdminHandler())
 
 	return corsMiddleware(mux)

@@ -202,6 +202,12 @@ func (s *State) GetTimeLeft() time.Duration {
 	return s.getTimeLeftLocked()
 }
 
+func (s *State) HasClients() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.clients) > 0
+}
+
 func (s *State) AddClient(client *websocket.Conn) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

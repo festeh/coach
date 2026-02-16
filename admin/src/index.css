@@ -96,3 +96,149 @@ td {
   padding: 0.5rem 0;
   border-bottom: 1px solid #21262d;
 }
+
+/* Hook manager */
+
+.hook-card {
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  background: #0d1117;
+}
+
+.hook-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.hook-header strong {
+  color: #f0f0f0;
+}
+
+.hook-header p {
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #8b949e;
+}
+
+.toggle input {
+  cursor: pointer;
+}
+
+h4 {
+  font-size: 0.85rem;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
+.schedule-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.field label {
+  font-size: 0.8rem;
+  color: #8b949e;
+}
+
+.field input,
+.field select,
+.field textarea {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #e1e4e8;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.field textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  outline: none;
+  border-color: #58a6ff;
+}
+
+.hook-params {
+  margin-top: 0.75rem;
+}
+
+.hook-schedule {
+  margin-bottom: 0.75rem;
+}
+
+.hook-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #21262d;
+}
+
+.btn-save,
+.btn-trigger {
+  padding: 0.4rem 1rem;
+  border-radius: 4px;
+  border: 1px solid #30363d;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+
+.btn-save {
+  background: #238636;
+  color: #fff;
+  border-color: #238636;
+}
+
+.btn-save:hover {
+  background: #2ea043;
+}
+
+.btn-trigger {
+  background: #161b22;
+  color: #e1e4e8;
+}
+
+.btn-trigger:hover {
+  background: #30363d;
+}
+
+.btn-save:disabled,
+.btn-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.status-msg {
+  font-size: 0.85rem;
+  color: #8b949e;
+}

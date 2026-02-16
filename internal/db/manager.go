@@ -237,6 +237,35 @@ func (m *Manager) GetFocusHistory(days int) ([]FocusRecord, error) {
 	return records, nil
 }
 
+// DoRequest executes an HTTP request with auth token and automatic token refresh on 401/403.
+func (m *Manager) DoRequest(req *http.Request) (*http.Response, error) {
+	return m.doRequestWithRetry(req, true)
+}
+
+func (m *Manager) doRequestWithRetry(req *http.Request, canRetry bool) (*http.Response, error) {
+	req.Header.Set("Authorization", m.AuthToken)
+
+	resp, err := m.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if (resp.StatusCode == 401 || resp.StatusCode == 403) && canRetry {
+		resp.Body.Close()
+		log.Info("Auth token expired, refreshing...")
+		token, err := m.authenticate()
+		if err != nil {
+			return nil, fmt.Errorf("failed to refresh token: %w", err)
+		}
+		m.AuthToken = token
+		log.Info("Token refreshed, retrying request")
+		req.Header.Set("Authorization", m.AuthToken)
+		return m.doRequestWithRetry(req, false)
+	}
+
+	return resp, nil
+}
+
 func (m *Manager) AddRecord(data map[string]any) error {
 	return m.addRecordWithRetry(data, true)
 }
