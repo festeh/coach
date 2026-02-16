@@ -87,19 +87,30 @@ func endOfToday() time.Time {
 	return time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, now.Location())
 }
 
+// parseFlexibleTime tries multiple date formats that dimaist may return.
+func parseFlexibleTime(s string) (time.Time, bool) {
+	formats := []string{
+		time.RFC3339,
+		"2006-01-02T15:04Z07:00",   // truncated RFC3339 (no seconds)
+		"2006-01-02T15:04:05Z07:00", // with seconds and tz offset
+		"2006-01-02",
+	}
+	for _, f := range formats {
+		if parsed, err := time.Parse(f, s); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
 func isDueBy(t Task, deadline time.Time) bool {
 	if t.DueDatetime != nil {
-		if parsed, err := time.Parse(time.RFC3339, *t.DueDatetime); err == nil {
+		if parsed, ok := parseFlexibleTime(*t.DueDatetime); ok {
 			return !parsed.After(deadline)
 		}
 	}
 	if t.DueDate != nil {
-		// due_date can be "2006-01-02" or RFC3339
-		s := *t.DueDate
-		if parsed, err := time.Parse("2006-01-02", s); err == nil {
-			return !parsed.After(deadline)
-		}
-		if parsed, err := time.Parse(time.RFC3339, s); err == nil {
+		if parsed, ok := parseFlexibleTime(*t.DueDate); ok {
 			return !parsed.After(deadline)
 		}
 	}
