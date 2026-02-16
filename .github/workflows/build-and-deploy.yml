@@ -74,6 +74,7 @@ jobs:
           PB_PASSWORD=${{ secrets.PB_PASSWORD }}
           AI_URL=${{ secrets.AI_URL }}
           AI_API_KEY=${{ secrets.AI_API_KEY }}
+          DIMAIST_URL=${{ secrets.DIMAIST_URL }}
           EOF
           chmod 600 ${{ env.DEPLOY_PATH }}/.env
 

@@ -11,6 +11,7 @@ import (
 
 	"coach/internal/ai"
 	"coach/internal/db"
+	"coach/internal/dimaist"
 	"coach/internal/stats"
 )
 
@@ -65,12 +66,19 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 	hookRunner := NewHookRunner(server.State, dbManager)
 	hookRunner.SetServer(server)
 
+	// Initialize dimaist client (optional)
+	var dimaistClient *dimaist.Client
+	dimaistClient, err = dimaist.NewClient()
+	if err != nil {
+		log.Warn("Dimaist client not available, tasks won't be included in AI context", "error", err)
+	}
+
 	// Register AI hook (only if AI env vars are set)
 	aiClient, err := ai.NewClient()
 	if err != nil {
 		log.Warn("AI client not available, AI hook disabled", "error", err)
 	} else {
-		hookRunner.Register(NewAIHookDef(aiClient))
+		hookRunner.Register(NewAIHookDef(aiClient, dimaistClient))
 	}
 
 	// Load configs from PocketBase (non-fatal if collection doesn't exist yet)
