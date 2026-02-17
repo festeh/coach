@@ -63,6 +63,8 @@ func (s *Server) HookByIDHandler(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case action == "trigger" && r.Method == http.MethodPost:
 		s.triggerHook(w, hookID)
+	case action == "context" && r.Method == http.MethodGet:
+		s.hookContext(w, hookID)
 	case action == "" && r.Method == http.MethodPut:
 		s.updateHookConfig(w, r, hookID)
 	default:
@@ -103,6 +105,22 @@ func (s *Server) updateHookConfig(w http.ResponseWriter, r *http.Request, hookID
 	}
 
 	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (s *Server) hookContext(w http.ResponseWriter, hookID string) {
+	if hookID != "ai_request" {
+		http.Error(w, "Context not available for this hook", http.StatusNotFound)
+		return
+	}
+
+	ctx := HookContext{
+		Trigger: "preview",
+		State:   s.State,
+		Server:  s,
+	}
+
+	context := GatherContext(ctx, s.DimaistClient)
+	writeJSON(w, map[string]string{"context": context})
 }
 
 // HookResultsHandler handles GET /api/hook-results

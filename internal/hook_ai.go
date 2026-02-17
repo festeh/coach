@@ -40,7 +40,7 @@ func NewAIHookDef(aiClient *ai.Client, dimaistClient *dimaist.Client) *HookDef {
 			prompt := ctx.Params["prompt"]
 
 			// Phase 1: Gather context
-			userMessage := gatherContext(ctx, dimaistClient)
+			userMessage := GatherContext(ctx, dimaistClient)
 
 			log.Info("Running AI hook", "model", model, "trigger", ctx.Trigger)
 
@@ -80,7 +80,7 @@ func NewAIHookDef(aiClient *ai.Client, dimaistClient *dimaist.Client) *HookDef {
 	}
 }
 
-func gatherContext(ctx HookContext, dimaistClient *dimaist.Client) string {
+func GatherContext(ctx HookContext, dimaistClient *dimaist.Client) string {
 	var b strings.Builder
 
 	// Coach focus stats

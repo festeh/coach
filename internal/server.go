@@ -17,12 +17,13 @@ import (
 
 // Server encapsulates all the state and handlers for the coach application
 type Server struct {
-	State      *State
-	QuoteStore *QuoteStore
-	DBManager  *db.Manager
-	HookRunner *HookRunner
-	AdminFS    fs.FS
-	upgrader   websocket.Upgrader
+	State         *State
+	QuoteStore    *QuoteStore
+	DBManager     *db.Manager
+	HookRunner    *HookRunner
+	DimaistClient *dimaist.Client
+	AdminFS       fs.FS
+	upgrader      websocket.Upgrader
 }
 
 // NewServer creates and initializes a new server instance
@@ -72,6 +73,7 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 	if err != nil {
 		log.Warn("Dimaist client not available, tasks won't be included in AI context", "error", err)
 	}
+	server.DimaistClient = dimaistClient
 
 	// Register AI hook (only if AI env vars are set)
 	aiClient, err := ai.NewClient()

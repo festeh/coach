@@ -19,8 +19,33 @@ body {
 
 h1 {
   font-size: 1.5rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
   color: #f0f0f0;
+}
+
+.nav {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid #30363d;
+}
+
+.nav a {
+  padding: 0.5rem 1rem;
+  color: #8b949e;
+  text-decoration: none;
+  font-size: 0.9rem;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.nav a:hover {
+  color: #e1e4e8;
+}
+
+.nav a.active {
+  color: #58a6ff;
+  border-bottom-color: #58a6ff;
 }
 
 h2 {
@@ -241,4 +266,16 @@ h4 {
 .status-msg {
   font-size: 0.85rem;
   color: #8b949e;
+}
+
+.context-preview {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #c9d1d9;
+  white-space: pre-wrap;
+  line-height: 1.5;
 }

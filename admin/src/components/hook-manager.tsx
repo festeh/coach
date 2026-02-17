@@ -3,6 +3,7 @@ import {
   fetchHooks,
   updateHookConfig,
   triggerHook,
+  fetchHookContext,
   type HookInfo,
   type ParamDef,
 } from "../api";
@@ -28,6 +29,8 @@ function HookCard(props: { hook: HookInfo; onSaved: () => void }) {
   const [saving, setSaving] = createSignal(false);
   const [triggering, setTriggering] = createSignal(false);
   const [status, setStatus] = createSignal("");
+  const [contextText, setContextText] = createSignal<string | null>(null);
+  const [loadingContext, setLoadingContext] = createSignal(false);
 
   const getParamValue = (p: ParamDef) => params()[p.key] || p.default;
 
@@ -53,6 +56,21 @@ function HookCard(props: { hook: HookInfo; onSaved: () => void }) {
       setStatus(`Error: ${e.message}`);
     }
     setSaving(false);
+  };
+
+  const toggleContext = async () => {
+    if (contextText() !== null) {
+      setContextText(null);
+      return;
+    }
+    setLoadingContext(true);
+    try {
+      const text = await fetchHookContext(props.hook.id);
+      setContextText(text);
+    } catch (e: any) {
+      setStatus(`Error: ${e.message}`);
+    }
+    setLoadingContext(false);
   };
 
   const trigger = async () => {
@@ -167,10 +185,16 @@ function HookCard(props: { hook: HookInfo; onSaved: () => void }) {
         <button class="btn-trigger" onClick={trigger} disabled={triggering()}>
           {triggering() ? "Running..." : "Trigger Now"}
         </button>
+        <button class="btn-trigger" onClick={toggleContext} disabled={loadingContext()}>
+          {loadingContext() ? "Loading..." : contextText() !== null ? "Hide Context" : "Show Context"}
+        </button>
         <Show when={status()}>
           <span class="status-msg">{status()}</span>
         </Show>
       </div>
+      <Show when={contextText() !== null}>
+        <pre class="context-preview">{contextText()}</pre>
+      </Show>
     </div>
   );
 }

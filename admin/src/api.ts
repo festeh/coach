@@ -111,3 +111,12 @@ export async function fetchHookResults(): Promise<HookResult[]> {
 export async function markHookResultRead(resultId: string): Promise<void> {
   await fetch(`/api/hook-results/${resultId}/read`, { method: "POST" });
 }
+
+export async function fetchHookContext(hookId: string): Promise<string> {
+  const res = await fetch(`/api/hooks/${hookId}/context`);
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+  const data = await res.json();
+  return data.context;
+}

@@ -1,14 +1,16 @@
-import FocusStatus from "./components/focus-status";
-import HistoryTable from "./components/history-table";
-import HookManager from "./components/hook-manager";
+import { A } from "@solidjs/router";
+import type { RouteSectionProps } from "@solidjs/router";
 
-export default function App() {
+export default function App(props: RouteSectionProps) {
   return (
     <div class="container">
       <h1>Coach Admin</h1>
-      <FocusStatus />
-      <HookManager />
-      <HistoryTable />
+      <nav class="nav">
+        <A href="/" end>Status</A>
+        <A href="/hooks">Hooks</A>
+        <A href="/history">History</A>
+      </nav>
+      {props.children}
     </div>
   );
 }
