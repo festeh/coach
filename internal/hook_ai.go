@@ -26,7 +26,7 @@ func NewAIHookDef(aiClient *ai.Client, dimaistClient *dimaist.Client) *HookDef {
 				Key:     "model",
 				Name:    "Model",
 				Type:    "text",
-				Default: "claude-sonnet-4-5",
+				Default: "claude-sonnet-4-6",
 			},
 			{
 				Key:     "prompt",
