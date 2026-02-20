@@ -83,11 +83,6 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 		hookRunner.Register(NewAIHookDef(aiClient, dimaistClient))
 	}
 
-	// Load configs from PocketBase (non-fatal if collection doesn't exist yet)
-	if err := hookRunner.LoadConfigs(); err != nil {
-		log.Warn("Failed to load hook configs", "error", err)
-	}
-
 	hookRunner.StartSchedulers()
 	server.HookRunner = hookRunner
 

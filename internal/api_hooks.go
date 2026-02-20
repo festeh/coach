@@ -23,7 +23,7 @@ func (s *Server) HooksHandler(w http.ResponseWriter, r *http.Request) {
 		Name        string            `json:"name"`
 		Description string            `json:"description"`
 		Params      []ParamDef        `json:"params"`
-		Config      *HookConfig       `json:"config"`
+		Config      *db.HookConfigRecord `json:"config"`
 	}
 
 	defs := s.HookRunner.GetDefs()
@@ -91,7 +91,7 @@ func (s *Server) updateHookConfig(w http.ResponseWriter, r *http.Request, hookID
 		return
 	}
 
-	var cfg HookConfig
+	var cfg db.HookConfigRecord
 	if err := json.Unmarshal(body, &cfg); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return

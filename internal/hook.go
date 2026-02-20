@@ -64,18 +64,6 @@ type HookDef struct {
 	Run         func(ctx HookContext) error
 }
 
-// HookConfig is the user-configurable settings for a hook, stored in PocketBase
-type HookConfig struct {
-	RecordID  string            `json:"record_id,omitempty"` // PocketBase record ID
-	HookID    string            `json:"hook_id"`
-	Enabled   bool              `json:"enabled"`
-	Trigger   string            `json:"trigger"`   // "scheduled"
-	FirstRun  string            `json:"first_run"` // "HH:MM"
-	LastRun   string            `json:"last_run"`  // "HH:MM"
-	Frequency string            `json:"frequency"` // e.g. "2h", "30m"
-	Params    map[string]string `json:"params"`
-}
-
 // HookContext is passed to a hook's Run function
 type HookContext struct {
 	Trigger string
@@ -95,22 +83,20 @@ type HookResult struct {
 
 // HookRunner manages hook registration, configuration, and scheduling
 type HookRunner struct {
-	defs    map[string]*HookDef
-	configs map[string]*HookConfig
-	timers  map[string]*time.Timer
-	state   *State
-	server  *Server
-	db      *db.Manager
-	mu      sync.Mutex
+	defs   map[string]*HookDef
+	timers map[string]*time.Timer
+	state  *State
+	server *Server
+	db     *db.Manager
+	mu     sync.Mutex
 }
 
 func NewHookRunner(state *State, dbManager *db.Manager) *HookRunner {
 	return &HookRunner{
-		defs:    make(map[string]*HookDef),
-		configs: make(map[string]*HookConfig),
-		timers:  make(map[string]*time.Timer),
-		state:   state,
-		db:      dbManager,
+		defs:   make(map[string]*HookDef),
+		timers: make(map[string]*time.Timer),
+		state:  state,
+		db:     dbManager,
 	}
 }
 
@@ -128,41 +114,20 @@ func (r *HookRunner) Register(def *HookDef) {
 	r.defs[def.ID] = def
 }
 
-// LoadConfigs loads hook configurations from PocketBase
-func (r *HookRunner) LoadConfigs() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
+// StartSchedulers loads configs from PocketBase and starts timers for all enabled scheduled hooks
+func (r *HookRunner) StartSchedulers() {
 	records, err := r.db.GetHookConfigs()
 	if err != nil {
-		return fmt.Errorf("failed to load hook configs: %w", err)
+		log.Warn("Failed to load hook configs for scheduling", "error", err)
+		return
 	}
 
-	for _, rec := range records {
-		cfg := HookConfig{
-			RecordID:  rec.RecordID,
-			HookID:    rec.HookID,
-			Enabled:   rec.Enabled,
-			Trigger:   rec.Trigger,
-			FirstRun:  rec.FirstRun,
-			LastRun:   rec.LastRun,
-			Frequency: rec.Frequency,
-			Params:    rec.Params,
-		}
-		r.configs[cfg.HookID] = &cfg
-	}
-
-	return nil
-}
-
-// StartSchedulers starts timers for all enabled scheduled hooks
-func (r *HookRunner) StartSchedulers() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	for hookID, cfg := range r.configs {
-		if cfg.Enabled && cfg.Trigger == "scheduled" {
-			r.scheduleNextLocked(hookID)
+	for _, rec := range records {
+		if rec.Enabled && rec.Trigger == "scheduled" {
+			r.scheduleNextLocked(rec.HookID, &rec)
 		}
 	}
 }
@@ -179,53 +144,50 @@ func (r *HookRunner) GetDefs() []*HookDef {
 	return defs
 }
 
-// GetConfig returns the config for a hook, or nil if not configured
-func (r *HookRunner) GetConfig(hookID string) *HookConfig {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if cfg, ok := r.configs[hookID]; ok {
-		cfgCopy := *cfg
-		return &cfgCopy
+// GetConfig returns the config for a hook from PocketBase, or nil if not configured
+func (r *HookRunner) GetConfig(hookID string) *db.HookConfigRecord {
+	rec, err := r.db.GetHookConfig(hookID)
+	if err != nil {
+		log.Error("Failed to get hook config", "hook_id", hookID, "error", err)
+		return nil
 	}
-	return nil
+	return rec
 }
 
 // UpdateConfig saves a hook config to PocketBase and reschedules if needed
-func (r *HookRunner) UpdateConfig(cfg HookConfig) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
+func (r *HookRunner) UpdateConfig(cfg db.HookConfigRecord) error {
 	// Stop existing timer
+	r.mu.Lock()
 	if timer, ok := r.timers[cfg.HookID]; ok {
 		timer.Stop()
 		delete(r.timers, cfg.HookID)
 	}
+	r.mu.Unlock()
 
-	// Save to PocketBase
-	existing := r.configs[cfg.HookID]
-	var err error
-	if existing != nil && existing.RecordID != "" {
+	// Check if record already exists in PocketBase
+	existing, err := r.db.GetHookConfig(cfg.HookID)
+	if err != nil {
+		return fmt.Errorf("failed to check existing hook config: %w", err)
+	}
+
+	if existing != nil {
 		cfg.RecordID = existing.RecordID
-		err = r.db.UpdateHookConfig(cfg.RecordID, hookConfigToMap(cfg))
+		if err := r.db.UpdateHookConfig(cfg.RecordID, hookConfigToMap(cfg)); err != nil {
+			return fmt.Errorf("failed to update hook config: %w", err)
+		}
 	} else {
-		recordID, createErr := r.db.CreateHookConfig(hookConfigToMap(cfg))
-		if createErr != nil {
-			return fmt.Errorf("failed to create hook config: %w", createErr)
+		recordID, err := r.db.CreateHookConfig(hookConfigToMap(cfg))
+		if err != nil {
+			return fmt.Errorf("failed to create hook config: %w", err)
 		}
 		cfg.RecordID = recordID
-		err = nil
-		_ = err
 	}
-	if err != nil {
-		return fmt.Errorf("failed to update hook config: %w", err)
-	}
-
-	r.configs[cfg.HookID] = &cfg
 
 	// Reschedule if enabled
 	if cfg.Enabled && cfg.Trigger == "scheduled" {
-		r.scheduleNextLocked(cfg.HookID)
+		r.mu.Lock()
+		r.scheduleNextLocked(cfg.HookID, &cfg)
+		r.mu.Unlock()
 	}
 
 	return nil
@@ -235,15 +197,15 @@ func (r *HookRunner) UpdateConfig(cfg HookConfig) error {
 func (r *HookRunner) RunHook(hookID string) error {
 	r.mu.Lock()
 	def, ok := r.defs[hookID]
-	if !ok {
-		r.mu.Unlock()
-		return fmt.Errorf("hook not found: %s", hookID)
-	}
-
-	params := r.resolveParamsLocked(hookID)
 	server := r.server
 	state := r.state
 	r.mu.Unlock()
+
+	if !ok {
+		return fmt.Errorf("hook not found: %s", hookID)
+	}
+
+	params := r.resolveParams(hookID)
 
 	ctx := HookContext{
 		Trigger: "manual",
@@ -255,19 +217,22 @@ func (r *HookRunner) RunHook(hookID string) error {
 	return def.Run(ctx)
 }
 
-// resolveParamsLocked merges defaults with user overrides. Must hold mu.
-func (r *HookRunner) resolveParamsLocked(hookID string) map[string]string {
+// resolveParams merges defaults with user overrides from PocketBase
+func (r *HookRunner) resolveParams(hookID string) map[string]string {
 	params := make(map[string]string)
 
 	// Fill defaults
+	r.mu.Lock()
 	if def, ok := r.defs[hookID]; ok {
 		for _, p := range def.Params {
 			params[p.Key] = p.Default
 		}
 	}
+	r.mu.Unlock()
 
-	// Override with user config
-	if cfg, ok := r.configs[hookID]; ok && cfg.Params != nil {
+	// Override with user config from DB
+	cfg := r.GetConfig(hookID)
+	if cfg != nil && cfg.Params != nil {
 		for k, v := range cfg.Params {
 			if v != "" {
 				params[k] = v
@@ -279,12 +244,7 @@ func (r *HookRunner) resolveParamsLocked(hookID string) map[string]string {
 }
 
 // scheduleNextLocked calculates and schedules the next fire time. Must hold mu.
-func (r *HookRunner) scheduleNextLocked(hookID string) {
-	cfg, ok := r.configs[hookID]
-	if !ok {
-		return
-	}
-
+func (r *HookRunner) scheduleNextLocked(hookID string, cfg *db.HookConfigRecord) {
 	dur := r.timeUntilNextFire(cfg)
 	if dur < 0 {
 		log.Warn("No upcoming fire time for hook", "hook_id", hookID)
@@ -315,16 +275,16 @@ func (r *HookRunner) onTimerFire(hookID string) {
 
 	r.mu.Lock()
 	def, ok := r.defs[hookID]
+	server := r.server
+	state := r.state
+	r.mu.Unlock()
+
 	if !ok {
-		r.mu.Unlock()
 		r.reschedule(hookID)
 		return
 	}
 
-	params := r.resolveParamsLocked(hookID)
-	server := r.server
-	state := r.state
-	r.mu.Unlock()
+	params := r.resolveParams(hookID)
 
 	ctx := HookContext{
 		Trigger: "scheduled",
@@ -342,13 +302,17 @@ func (r *HookRunner) onTimerFire(hookID string) {
 }
 
 func (r *HookRunner) reschedule(hookID string) {
+	cfg := r.GetConfig(hookID)
+	if cfg == nil {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.scheduleNextLocked(hookID)
+	r.scheduleNextLocked(hookID, cfg)
 }
 
 // timeUntilNextFire calculates the duration until the next fire time
-func (r *HookRunner) timeUntilNextFire(cfg *HookConfig) time.Duration {
+func (r *HookRunner) timeUntilNextFire(cfg *db.HookConfigRecord) time.Duration {
 	now := time.Now()
 
 	firstRun, err := parseTimeOfDay(cfg.FirstRun)
@@ -409,7 +373,7 @@ func parseTimeOfDay(s string) (timeOfDay, error) {
 	return timeOfDay{hour: h, minute: m}, nil
 }
 
-func hookConfigToMap(cfg HookConfig) map[string]any {
+func hookConfigToMap(cfg db.HookConfigRecord) map[string]any {
 	return map[string]any{
 		"hook_id":   cfg.HookID,
 		"enabled":   cfg.Enabled,

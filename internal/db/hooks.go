@@ -12,7 +12,7 @@ import (
 
 // HookConfigRecord represents a hook config stored in PocketBase
 type HookConfigRecord struct {
-	RecordID  string            `json:"record_id"`
+	RecordID  string            `json:"id"`
 	HookID    string            `json:"hook_id"`
 	Enabled   bool              `json:"enabled"`
 	Trigger   string            `json:"trigger"`
@@ -31,9 +31,25 @@ type HookResultRecord struct {
 	Created string `json:"created"`
 }
 
+// GetHookConfig loads a single hook config by hook_id from PocketBase
+func (m *Manager) GetHookConfig(hookID string) (*HookConfigRecord, error) {
+	configs, err := m.fetchHookConfigs(fmt.Sprintf("filter=(hook_id='%s')&perPage=1", hookID))
+	if err != nil {
+		return nil, err
+	}
+	if len(configs) == 0 {
+		return nil, nil
+	}
+	return &configs[0], nil
+}
+
 // GetHookConfigs loads all hook configs from PocketBase
 func (m *Manager) GetHookConfigs() ([]HookConfigRecord, error) {
-	endpoint := fmt.Sprintf("%s/api/collections/hooks/records?perPage=100", m.BaseURL)
+	return m.fetchHookConfigs("perPage=100")
+}
+
+func (m *Manager) fetchHookConfigs(query string) ([]HookConfigRecord, error) {
+	endpoint := fmt.Sprintf("%s/api/collections/hooks/records?%s", m.BaseURL, query)
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -51,44 +67,19 @@ func (m *Manager) GetHookConfigs() ([]HookConfigRecord, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		// Collection might not exist yet — return empty
 		log.Warn("Failed to load hook configs", "status", resp.StatusCode, "body", string(body))
 		return nil, nil
 	}
 
 	var result struct {
-		Items []struct {
-			ID        string            `json:"id"`
-			HookID    string            `json:"hook_id"`
-			Enabled   bool              `json:"enabled"`
-			Trigger   string            `json:"trigger"`
-			FirstRun  string            `json:"first_run"`
-			LastRun   string            `json:"last_run"`
-			Frequency string            `json:"frequency"`
-			Params    map[string]string `json:"params"`
-		} `json:"items"`
+		Items []HookConfigRecord `json:"items"`
 	}
 
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	configs := make([]HookConfigRecord, 0, len(result.Items))
-	for _, item := range result.Items {
-		cfg := HookConfigRecord{
-			RecordID:  item.ID,
-			HookID:    item.HookID,
-			Enabled:   item.Enabled,
-			Trigger:   item.Trigger,
-			FirstRun:  item.FirstRun,
-			LastRun:   item.LastRun,
-			Frequency: item.Frequency,
-			Params:    item.Params,
-		}
-		configs = append(configs, cfg)
-	}
-
-	return configs, nil
+	return result.Items, nil
 }
 
 // CreateHookConfig creates a new hook config record in PocketBase
