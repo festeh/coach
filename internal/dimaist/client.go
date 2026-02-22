@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -44,6 +45,44 @@ func NewClient() (*Client, error) {
 			Timeout: 10 * time.Second,
 		},
 	}, nil
+}
+
+// syncResponse is the response from the /sync endpoint.
+type syncResponse struct {
+	Tasks             []json.RawMessage `json:"tasks"`
+	Projects          []json.RawMessage `json:"projects"`
+	DeletedTaskIds    []uint            `json:"deleted_task_ids"`
+	DeletedProjectIds []uint            `json:"deleted_project_ids"`
+}
+
+// WasActiveToday checks whether the user interacted with dimaist today
+// by calling /sync with start-of-today as the sync token.
+func (c *Client) WasActiveToday(ctx context.Context) (bool, error) {
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	token := startOfDay.Format(time.RFC3339)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/sync?sync_token="+url.QueryEscape(token), nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("failed to fetch sync: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("dimaist sync API returned status %d", resp.StatusCode)
+	}
+
+	var sr syncResponse
+	if err := json.NewDecoder(resp.Body).Decode(&sr); err != nil {
+		return false, fmt.Errorf("failed to decode sync response: %w", err)
+	}
+
+	return len(sr.Tasks) > 0 || len(sr.Projects) > 0 || len(sr.DeletedTaskIds) > 0 || len(sr.DeletedProjectIds) > 0, nil
 }
 
 // GetTodayTasks fetches all tasks and returns those due today or earlier that are not completed.
