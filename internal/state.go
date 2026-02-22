@@ -76,6 +76,23 @@ func (s *State) AddHook(hook Hook) {
 	s.hooks = append(s.hooks, hook)
 }
 
+// RestoreFocus restores an active focus session from DB on startup.
+// Unlike SetFocusing, it does not trigger hooks or bump stats (those were already recorded).
+func (s *State) RestoreFocus(remaining time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	s.focusRequests = append(s.focusRequests, FocusRequest{
+		StartTime: now,
+		EndTime:   now.Add(remaining),
+	})
+	s.LastChange = now
+	s.scheduleExpiryTimer()
+
+	log.Info("Restored focus session from database", "remaining", remaining)
+}
+
 func (s *State) SetFocusing(duration time.Duration) {
 	s.mu.Lock()
 

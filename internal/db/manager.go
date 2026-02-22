@@ -157,6 +157,79 @@ func (m *Manager) GetTodayFocusCount() (int, error) {
 	return result.TotalItems, nil
 }
 
+// GetActiveFocus returns the remaining duration if a focus session is still active (timestamp + duration > now).
+// Returns 0 if no active session exists.
+func (m *Manager) GetActiveFocus() (time.Duration, error) {
+	log.Info("Checking for active focus session")
+
+	baseEndpoint := fmt.Sprintf("%s/api/collections/coach/records", m.BaseURL)
+	u, err := url.Parse(baseEndpoint)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse URL: %w", err)
+	}
+
+	q := u.Query()
+	q.Set("sort", "-timestamp")
+	q.Set("perPage", "1")
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", m.AuthToken)
+
+	resp, err := m.Client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp ErrorResponse
+		if err := json.Unmarshal(body, &errResp); err != nil {
+			return 0, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+		}
+		return 0, fmt.Errorf("request failed: %s", errResp.Message)
+	}
+
+	var result struct {
+		Items []struct {
+			Timestamp string `json:"timestamp"`
+			Duration  int    `json:"duration"`
+		} `json:"items"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return 0, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if len(result.Items) == 0 {
+		return 0, nil
+	}
+
+	item := result.Items[0]
+	ts, err := time.Parse("2006-01-02 15:04:05.000Z", item.Timestamp)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse timestamp: %w", err)
+	}
+
+	endTime := ts.Add(time.Duration(item.Duration) * time.Second)
+	remaining := time.Until(endTime)
+	if remaining <= 0 {
+		return 0, nil
+	}
+
+	log.Info("Found active focus session", "remaining", remaining)
+	return remaining, nil
+}
+
 // GetFocusHistory returns focus records for the last N days
 func (m *Manager) GetFocusHistory(days int) ([]FocusRecord, error) {
 	log.Info("Getting focus history", "days", days)

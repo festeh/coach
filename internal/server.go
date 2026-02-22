@@ -61,6 +61,13 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 
 	server.State.stats = stats
 	server.State.AddHook(DatabaseHook(dbManager))
+
+	// Restore active focus session from DB (if any)
+	if remaining, err := dbManager.GetActiveFocus(); err != nil {
+		log.Warn("Failed to check for active focus session", "error", err)
+	} else if remaining > 0 {
+		server.State.RestoreFocus(remaining)
+	}
 	server.DBManager = dbManager
 
 	// Initialize hook runner
