@@ -9,15 +9,26 @@ import (
 )
 
 // AgentLockRecord is the singleton record in the agent_lock collection.
-//
-// PB schema:
-//
-//	collection: agent_lock
-//	fields:
-//	  release_until (text) — RFC3339 timestamp, or empty when the lock is engaged
 type AgentLockRecord struct {
 	RecordID     string `json:"id"`
 	ReleaseUntil string `json:"release_until"`
+}
+
+// agentLockCollection is the schema for the agent_lock collection.
+//
+//	release_until (text) — RFC3339 timestamp, or empty when the lock is engaged
+var agentLockCollection = Collection{
+	Name: "agent_lock",
+	Type: "base",
+	Fields: []Field{
+		{Name: "release_until", Type: "text", Required: false},
+	},
+}
+
+// EnsureAgentLockCollection creates the agent_lock collection if it doesn't exist.
+// Idempotent.
+func (m *Manager) EnsureAgentLockCollection() (created bool, err error) {
+	return m.EnsureCollection(agentLockCollection)
 }
 
 // GetAgentReleaseUntil reads the singleton agent_lock record. Returns nil if no record

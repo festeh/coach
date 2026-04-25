@@ -54,6 +54,13 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 		return nil, err
 	}
 
+	// Auto-migrate collections owned by coach itself (not by the coach_db CLI).
+	if created, err := dbManager.EnsureAgentLockCollection(); err != nil {
+		log.Warn("Failed to ensure agent_lock collection — agent lock state won't persist", "error", err)
+	} else if created {
+		log.Info("Created agent_lock collection")
+	}
+
 	stats, err := stats.New(dbManager)
 	if err != nil {
 		return nil, err
