@@ -60,6 +60,7 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 	}
 
 	server.State.stats = stats
+	server.State.dbManager = dbManager
 	server.State.AddHook(DatabaseHook(dbManager))
 
 	// Restore active focus session from DB (if any)
@@ -67,6 +68,13 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 		log.Warn("Failed to check for active focus session", "error", err)
 	} else if remaining > 0 {
 		server.State.RestoreFocus(remaining)
+	}
+
+	// Restore active agent-lock release window from DB (if any)
+	if releaseUntil, err := dbManager.GetAgentReleaseUntil(); err != nil {
+		log.Warn("Failed to load agent lock state", "error", err)
+	} else {
+		server.State.RestoreAgentLock(releaseUntil)
 	}
 	server.DBManager = dbManager
 
@@ -119,6 +127,9 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/focusing", s.FocusHandler)
 	mux.HandleFunc("/history", s.HistoryHandler)
 	mux.HandleFunc("/connect", s.WebsocketHandler)
+	mux.HandleFunc("/agent-lock", s.AgentLockHandler)
+	mux.HandleFunc("/agent-lock/release", s.AgentLockHandler)
+	mux.HandleFunc("/agent-lock/engage", s.AgentLockHandler)
 	mux.HandleFunc("/api/hooks", s.HooksHandler)
 	mux.HandleFunc("/api/hooks/", s.HookByIDHandler)
 	mux.HandleFunc("/api/hook-results", s.HookResultsHandler)

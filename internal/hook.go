@@ -267,8 +267,8 @@ func (r *HookRunner) onTimerFire(hookID string) {
 		return
 	}
 
-	if r.state.IsFocusing() {
-		log.Info("Skipping hook: currently focusing", "hook_id", hookID)
+	if r.state.IsBlocked() {
+		log.Info("Skipping hook: currently blocked", "hook_id", hookID)
 		r.reschedule(hookID)
 		return
 	}

@@ -1,6 +1,7 @@
 package coach
 
 import (
+	"coach/internal/db"
 	"coach/internal/stats"
 	"encoding/json"
 	"sync"
@@ -20,12 +21,15 @@ type FocusRequest struct {
 type State struct {
 	LastChange time.Time
 
-	clients       map[*websocket.Conn]bool
-	focusRequests []FocusRequest
-	hooks         []Hook
-	mu            sync.Mutex
-	stats         *stats.Stats
-	expiryTimer   *time.Timer
+	clients           map[*websocket.Conn]bool
+	focusRequests     []FocusRequest
+	hooks             []Hook
+	mu                sync.Mutex
+	stats             *stats.Stats
+	expiryTimer       *time.Timer
+	dbManager         *db.Manager
+	agentReleaseUntil *time.Time
+	agentLockTimer    *time.Timer
 }
 
 // NewState creates a properly initialized State instance
@@ -44,11 +48,17 @@ func (s *State) IsFocusing() bool {
 }
 
 type FocusInfo struct {
-	Type            string        `json:"type"`
-	Focusing        bool          `json:"focusing"`
-	SinceLastChange time.Duration `json:"since_last_change"`
-	FocusTimeLeft   time.Duration `json:"focus_time_left"`
-	NumFocuses      int           `json:"num_focuses"`
+	Type                 string        `json:"type"`
+	Focusing             bool          `json:"focusing"`
+	SinceLastChange      time.Duration `json:"since_last_change"`
+	FocusTimeLeft        time.Duration `json:"focus_time_left"`
+	NumFocuses           int           `json:"num_focuses"`
+	AgentReleaseTimeLeft *int64        `json:"agent_release_time_left"`
+}
+
+// AgentLockInfo is the public shape of agent-lock state. TimeLeftSeconds is nil when locked.
+type AgentLockInfo struct {
+	TimeLeftSeconds *int64 `json:"time_left_seconds"`
 }
 
 func (s *State) GetCurrentFocusInfo() FocusInfo {
@@ -61,12 +71,166 @@ func (s *State) GetCurrentFocusInfo() FocusInfo {
 		numFocuses = s.stats.GetTodayFocusCount()
 	}
 	return FocusInfo{
-		Type:            "focusing",
-		Focusing:        s.getTimeLeftLocked() > 0,
-		SinceLastChange: sinceLastChange / time.Second,
-		FocusTimeLeft:   focusTimeLeft / time.Second,
-		NumFocuses:      numFocuses,
+		Type:                 "focusing",
+		Focusing:             s.getTimeLeftLocked() > 0,
+		SinceLastChange:      sinceLastChange / time.Second,
+		FocusTimeLeft:        focusTimeLeft / time.Second,
+		NumFocuses:           numFocuses,
+		AgentReleaseTimeLeft: s.agentReleaseTimeLeftLocked(),
 	}
+}
+
+// GetAgentLockInfo returns the current agent-lock state.
+func (s *State) GetAgentLockInfo() AgentLockInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return AgentLockInfo{TimeLeftSeconds: s.agentReleaseTimeLeftLocked()}
+}
+
+// IsAgentLocked returns true if no release window is active.
+func (s *State) IsAgentLocked() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.isAgentLockedLocked()
+}
+
+// IsBlocked returns true when either lock is engaged.
+func (s *State) IsBlocked() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.getTimeLeftLocked() > 0 || s.isAgentLockedLocked()
+}
+
+// ReleaseAgentLock unlocks the agent lock for d. If a release is already active and ends
+// after now+d, this is a no-op (we never shorten an existing release here).
+func (s *State) ReleaseAgentLock(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	s.mu.Lock()
+	candidate := time.Now().Add(d)
+	changed := false
+	if s.agentReleaseUntil == nil || s.agentReleaseUntil.Before(candidate) {
+		until := candidate
+		s.agentReleaseUntil = &until
+		s.scheduleAgentLockTimerLocked()
+		s.persistAgentReleaseUntilLocked()
+		changed = true
+	}
+	s.mu.Unlock()
+
+	if changed {
+		log.Info("Agent lock released", "until", candidate)
+		go s.NotifyAllClients(s.GetCurrentFocusInfo())
+	}
+}
+
+// EngageAgentLock cancels any active release window.
+func (s *State) EngageAgentLock() {
+	s.mu.Lock()
+	changed := s.agentReleaseUntil != nil
+	s.agentReleaseUntil = nil
+	if s.agentLockTimer != nil {
+		s.agentLockTimer.Stop()
+		s.agentLockTimer = nil
+	}
+	if changed {
+		s.persistAgentReleaseUntilLocked()
+	}
+	s.mu.Unlock()
+
+	if changed {
+		log.Info("Agent lock engaged")
+		go s.NotifyAllClients(s.GetCurrentFocusInfo())
+	}
+}
+
+// RestoreAgentLock seeds agentReleaseUntil from persisted state on startup and schedules
+// the snap-back timer for the remainder. Past values are ignored (lock stays engaged).
+func (s *State) RestoreAgentLock(t *time.Time) {
+	if t == nil || !time.Now().Before(*t) {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	until := *t
+	s.agentReleaseUntil = &until
+	s.scheduleAgentLockTimerLocked()
+	log.Info("Restored agent lock release", "until", until)
+}
+
+// isAgentLockedLocked must be called with s.mu held.
+func (s *State) isAgentLockedLocked() bool {
+	if s.agentReleaseUntil == nil {
+		return true
+	}
+	return !time.Now().Before(*s.agentReleaseUntil)
+}
+
+// agentReleaseTimeLeftLocked returns seconds until release expiry, or nil if locked.
+// Must be called with s.mu held.
+func (s *State) agentReleaseTimeLeftLocked() *int64 {
+	if s.isAgentLockedLocked() {
+		return nil
+	}
+	secs := int64(time.Until(*s.agentReleaseUntil) / time.Second)
+	if secs < 0 {
+		secs = 0
+	}
+	return &secs
+}
+
+// scheduleAgentLockTimerLocked replaces the snap-back timer to fire at agentReleaseUntil.
+// If the value is in the past, no timer is scheduled. Must be called with s.mu held.
+func (s *State) scheduleAgentLockTimerLocked() {
+	if s.agentLockTimer != nil {
+		s.agentLockTimer.Stop()
+		s.agentLockTimer = nil
+	}
+	if s.agentReleaseUntil == nil {
+		return
+	}
+	d := time.Until(*s.agentReleaseUntil)
+	if d <= 0 {
+		return
+	}
+	s.agentLockTimer = time.AfterFunc(d, s.onAgentLockTimerFire)
+}
+
+// onAgentLockTimerFire is the snap-back callback. It double-checks the time so that a
+// race with a longer ReleaseAgentLock call doesn't wipe a freshly extended release.
+func (s *State) onAgentLockTimerFire() {
+	s.mu.Lock()
+	expired := s.agentReleaseUntil != nil && !time.Now().Before(*s.agentReleaseUntil)
+	if expired {
+		s.agentReleaseUntil = nil
+		s.agentLockTimer = nil
+		s.persistAgentReleaseUntilLocked()
+	}
+	s.mu.Unlock()
+
+	if expired {
+		log.Info("Agent lock release expired")
+		go s.NotifyAllClients(s.GetCurrentFocusInfo())
+	}
+}
+
+// persistAgentReleaseUntilLocked writes the current value to the DB. Best-effort, async.
+// Must be called with s.mu held (only reads s.agentReleaseUntil).
+func (s *State) persistAgentReleaseUntilLocked() {
+	if s.dbManager == nil {
+		return
+	}
+	var t *time.Time
+	if s.agentReleaseUntil != nil {
+		copy := *s.agentReleaseUntil
+		t = &copy
+	}
+	go func() {
+		if err := s.dbManager.SetAgentReleaseUntil(t); err != nil {
+			log.Error("Failed to persist agent lock state", "error", err)
+		}
+	}()
 }
 
 // AddHook registers a new hook function to be called when focus state changes

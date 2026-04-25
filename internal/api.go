@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/charmbracelet/log"
 	"github.com/gorilla/websocket"
@@ -84,6 +85,59 @@ func (s *Server) FocusHandler(w http.ResponseWriter, r *http.Request) {
 
 	s.State.HandleFocusChange(focusing, durationInt)
 	writeJSON(w, s.State.GetCurrentFocusInfo())
+}
+
+// @Summary Get or release/engage the agent lock
+// @Description GET returns current agent-lock state. POST /agent-lock/release with form
+// @Description duration=N (seconds) releases the lock for N seconds (extends if longer
+// @Description than current release). POST /agent-lock/engage cancels any active release.
+// @Tags agent-lock
+// @Produce json
+// @Success 200 {object} AgentLockInfo
+// @Failure 400 {string} string "Bad request"
+// @Failure 405 {string} string "Method not allowed"
+// @Router /agent-lock [get]
+// @Router /agent-lock/release [post]
+// @Router /agent-lock/engage [post]
+func (s *Server) AgentLockHandler(w http.ResponseWriter, r *http.Request) {
+	log.Info("Called /agent-lock", "method", r.Method, "path", r.URL.Path)
+
+	switch r.URL.Path {
+	case "/agent-lock":
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, s.State.GetAgentLockInfo())
+
+	case "/agent-lock/release":
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "Failed to parse form", http.StatusBadRequest)
+			return
+		}
+		duration, err := strconv.Atoi(r.FormValue("duration"))
+		if err != nil || duration <= 0 {
+			http.Error(w, "duration must be a positive integer (seconds)", http.StatusBadRequest)
+			return
+		}
+		s.State.ReleaseAgentLock(time.Duration(duration) * time.Second)
+		writeJSON(w, s.State.GetAgentLockInfo())
+
+	case "/agent-lock/engage":
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.State.EngageAgentLock()
+		writeJSON(w, s.State.GetAgentLockInfo())
+
+	default:
+		http.NotFound(w, r)
+	}
 }
 
 // @Summary Get focus history
