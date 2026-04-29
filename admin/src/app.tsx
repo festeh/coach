@@ -7,7 +7,6 @@ export default function App(props: RouteSectionProps) {
       <h1>Coach Admin</h1>
       <nav class="nav">
         <A href="/" end>Status</A>
-        <A href="/hooks">Hooks</A>
         <A href="/history">History</A>
       </nav>
       {props.children}

@@ -47,29 +47,6 @@ func collections() []db.Collection {
 			Indexes: []string{"CREATE UNIQUE INDEX `ts_index` ON `coach` (`timestamp`)"},
 		},
 		{
-			Name: "hooks",
-			Type: "base",
-			Fields: []db.Field{
-				{Name: "hook_id", Type: "text", Required: true},
-				{Name: "enabled", Type: "bool", Required: false},
-				{Name: "trigger", Type: "text", Required: false},
-				{Name: "first_run", Type: "text", Required: false},
-				{Name: "last_run", Type: "text", Required: false},
-				{Name: "frequency", Type: "text", Required: false},
-				{Name: "params", Type: "json", Required: false},
-			},
-			Indexes: []string{"CREATE UNIQUE INDEX `hook_id_index` ON `hooks` (`hook_id`)"},
-		},
-		{
-			Name: "hook_results",
-			Type: "base",
-			Fields: []db.Field{
-				{Name: "hook_id", Type: "text", Required: true},
-				{Name: "content", Type: "text", Required: true},
-				{Name: "read", Type: "bool", Required: false},
-			},
-		},
-		{
 			Name: "agent_lock",
 			Type: "base",
 			Fields: []db.Field{

@@ -9,21 +9,17 @@ import (
 
 	"github.com/charmbracelet/log"
 
-	"coach/internal/ai"
 	"coach/internal/db"
-	"coach/internal/dimaist"
 	"coach/internal/stats"
 )
 
 // Server encapsulates all the state and handlers for the coach application
 type Server struct {
-	State         *State
-	QuoteStore    *QuoteStore
-	DBManager     *db.Manager
-	HookRunner    *HookRunner
-	DimaistClient *dimaist.Client
-	AdminFS       fs.FS
-	upgrader      websocket.Upgrader
+	State      *State
+	QuoteStore *QuoteStore
+	DBManager  *db.Manager
+	AdminFS    fs.FS
+	upgrader   websocket.Upgrader
 }
 
 // NewServer creates and initializes a new server instance
@@ -85,29 +81,6 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 	}
 	server.DBManager = dbManager
 
-	// Initialize hook runner
-	hookRunner := NewHookRunner(server.State, dbManager)
-	hookRunner.SetServer(server)
-
-	// Initialize dimaist client (optional)
-	var dimaistClient *dimaist.Client
-	dimaistClient, err = dimaist.NewClient()
-	if err != nil {
-		log.Warn("Dimaist client not available, tasks won't be included in AI context", "error", err)
-	}
-	server.DimaistClient = dimaistClient
-
-	// Register AI hook (only if AI env vars are set)
-	aiClient, err := ai.NewClient()
-	if err != nil {
-		log.Warn("AI client not available, AI hook disabled", "error", err)
-	} else {
-		hookRunner.Register(NewAIHookDef(aiClient, dimaistClient))
-	}
-
-	hookRunner.StartSchedulers()
-	server.HookRunner = hookRunner
-
 	return server, nil
 }
 
@@ -137,10 +110,6 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/agent-lock", s.AgentLockHandler)
 	mux.HandleFunc("/agent-lock/release", s.AgentLockHandler)
 	mux.HandleFunc("/agent-lock/engage", s.AgentLockHandler)
-	mux.HandleFunc("/api/hooks", s.HooksHandler)
-	mux.HandleFunc("/api/hooks/", s.HookByIDHandler)
-	mux.HandleFunc("/api/hook-results", s.HookResultsHandler)
-	mux.HandleFunc("/api/hook-results/", s.HookResultByIDHandler)
 	mux.Handle("/admin/", s.AdminHandler())
 
 	return corsMiddleware(mux)
