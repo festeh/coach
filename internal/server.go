@@ -15,11 +15,12 @@ import (
 
 // Server encapsulates all the state and handlers for the coach application
 type Server struct {
-	State      *State
-	QuoteStore *QuoteStore
-	DBManager  *db.Manager
-	AdminFS    fs.FS
-	upgrader   websocket.Upgrader
+	State            *State
+	QuoteStore       *QuoteStore
+	DBManager        *db.Manager
+	AttentionTracker *AttentionTracker
+	AdminFS          fs.FS
+	upgrader         websocket.Upgrader
 }
 
 // NewServer creates and initializes a new server instance
@@ -56,6 +57,12 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 	} else if created {
 		log.Info("Created agent_lock collection")
 	}
+	if created, err := dbManager.EnsureAttentionCollection(); err != nil {
+		log.Warn("Failed to ensure attention collection — attention beacons won't persist", "error", err)
+	} else if created {
+		log.Info("Created attention collection")
+	}
+	server.AttentionTracker = NewAttentionTracker(dbManager)
 
 	stats, err := stats.New(dbManager)
 	if err != nil {

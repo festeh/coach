@@ -215,6 +215,8 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 		var message struct {
 			Type     string `json:"type"`
 			Duration int    `json:"duration,omitempty"`
+			State    string `json:"state,omitempty"`
+			Site     string `json:"site,omitempty"`
 		}
 
 		if err := json.Unmarshal(buf, &message); err != nil {
@@ -236,6 +238,13 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 				duration = message.Duration
 			}
 			s.State.HandleFocusChange(true, duration)
+		case "attention":
+			switch message.State {
+			case "site", "idle", "away":
+				s.AttentionTracker.Handle(message.State, message.Site)
+			default:
+				log.Warn("Invalid attention state", "state", message.State)
+			}
 		case "ping":
 			// "type" is what current clients match on; "response" is kept for
 			// backwards compatibility with older clients.
