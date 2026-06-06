@@ -122,3 +122,136 @@ td {
   border-bottom: 1px solid #21262d;
 }
 
+.usage-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.daynav {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.daynav button {
+  background: #21262d;
+  color: #e1e4e8;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.daynav button:hover:not(:disabled) {
+  background: #30363d;
+}
+
+.daynav button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.daynav-date {
+  font-size: 0.9rem;
+  color: #c9d1d9;
+  min-width: 7.5rem;
+  text-align: center;
+}
+
+.usage-totals {
+  grid-template-columns: repeat(3, 1fr);
+  margin-bottom: 1.25rem;
+}
+
+.timeline {
+  position: relative;
+  height: 32px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.timeline-span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.timeline-hours {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: #8b949e;
+  margin-top: 0.25rem;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+  color: #8b949e;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.site-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.site-bar-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 14rem) 1fr 4.5rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.site-bar-name {
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.site-bar-track {
+  height: 10px;
+  background: #0d1117;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.site-bar-fill {
+  height: 100%;
+  border-radius: 5px;
+}
+
+.site-bar-time {
+  font-size: 0.8rem;
+  color: #8b949e;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.site-bars-more {
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
+}
+

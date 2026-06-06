@@ -8,6 +8,7 @@ export default function App(props: RouteSectionProps) {
       <nav class="nav">
         <A href="/" end>Status</A>
         <A href="/history">History</A>
+        <A href="/usage">Usage</A>
       </nav>
       {props.children}
     </div>

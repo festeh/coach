@@ -34,6 +34,22 @@ export async function fetchHistory(days = 7): Promise<FocusRecord[]> {
   return res.json();
 }
 
+export interface AttentionInterval {
+  state: "site" | "idle" | "away";
+  site: string;
+  started_at: string;
+  last_seen: string;
+}
+
+export async function fetchAttention(from: Date, to: Date): Promise<AttentionInterval[]> {
+  const params = new URLSearchParams({
+    from: from.toISOString(),
+    to: to.toISOString(),
+  });
+  const res = await fetch(`/attention?${params}`);
+  return res.json();
+}
+
 export async function fetchHealth(): Promise<boolean> {
   try {
     const res = await fetch("/health");
