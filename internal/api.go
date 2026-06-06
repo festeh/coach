@@ -237,9 +237,13 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			s.State.HandleFocusChange(true, duration)
 		case "ping":
+			// "type" is what current clients match on; "response" is kept for
+			// backwards compatibility with older clients.
 			response := struct {
+				Type     string `json:"type"`
 				Response string `json:"response"`
 			}{
+				Type:     "pong",
 				Response: "pong",
 			}
 
