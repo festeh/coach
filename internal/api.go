@@ -177,6 +177,54 @@ func (s *Server) HistoryHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, records)
 }
 
+// @Summary Get attention intervals
+// @Description Returns attention intervals overlapping the [from, to) window.
+// @Description Defaults to the last 24 hours.
+// @Tags attention
+// @Produce json
+// @Param from query string false "RFC3339 start of window (default: 24h ago)"
+// @Param to query string false "RFC3339 end of window (default: now)"
+// @Success 200 {array} db.AttentionInterval "Array of attention intervals"
+// @Failure 400 {string} string "Bad request"
+// @Failure 500 {string} string "Internal server error"
+// @Router /attention [get]
+func (s *Server) AttentionHandler(w http.ResponseWriter, r *http.Request) {
+	log.Info("Called /attention", "method", r.Method)
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	now := time.Now()
+	from, to := now.Add(-24*time.Hour), now
+	if v := r.URL.Query().Get("from"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			http.Error(w, "from must be RFC3339", http.StatusBadRequest)
+			return
+		}
+		from = t
+	}
+	if v := r.URL.Query().Get("to"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			http.Error(w, "to must be RFC3339", http.StatusBadRequest)
+			return
+		}
+		to = t
+	}
+
+	intervals, err := s.DBManager.GetAttentionIntervals(from, to)
+	if err != nil {
+		log.Error("Failed to get attention intervals", "err", err)
+		http.Error(w, "Failed to get attention intervals", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, intervals)
+}
+
 // @Summary WebSocket connection endpoint
 // @Description Establishes a WebSocket connection for real-time updates
 // @Tags websocket
