@@ -16,7 +16,6 @@ import (
 // Server encapsulates all the state and handlers for the coach application
 type Server struct {
 	State            *State
-	QuoteStore       *QuoteStore
 	DBManager        *db.Manager
 	AttentionTracker *AttentionTracker
 	AdminFS          fs.FS
@@ -29,8 +28,7 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 		State: &State{
 			LastChange: time.Now(),
 		},
-		QuoteStore: &QuoteStore{},
-		AdminFS:    adminFS,
+		AdminFS: adminFS,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -38,11 +36,6 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 				return true
 			},
 		},
-	}
-
-	err := server.QuoteStore.Load()
-	if err != nil {
-		return nil, err
 	}
 
 	// Initialize database manager
@@ -128,17 +121,4 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.Handle("/admin/", s.AdminHandler())
 
 	return corsMiddleware(mux)
-}
-
-// BroadcastQuote sends a random quote to all connected clients
-func (s *Server) BroadcastQuote() {
-	message := struct {
-		Event string `json:"event"`
-		Quote string `json:"quote"`
-	}{
-		Event: "quote",
-		Quote: s.QuoteStore.GetQuote().Text,
-	}
-
-	s.State.NotifyAllClients(message)
 }

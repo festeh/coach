@@ -22,7 +22,7 @@ func TestReleaseStillWorksWithoutJournalFields(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("Expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
-	if server.State.IsAgentLocked() {
+	if agentLocked(server.State) {
 		t.Error("State should be released after /release")
 	}
 }

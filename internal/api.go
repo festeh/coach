@@ -397,8 +397,6 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 		log.Debug("Received message", "type", message.Type)
 
 		switch message.Type {
-		case "get_quote":
-			s.BroadcastQuote()
 		case "get_focusing":
 			focusInfo := s.State.GetCurrentFocusInfo()
 			if err := s.State.NotifySingleClient(conn, focusInfo); err != nil {

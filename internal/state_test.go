@@ -5,13 +5,32 @@ import (
 	"time"
 )
 
+// Test-only probes into State. Production code reads state through
+// GetCurrentFocusInfo / GetAgentLockInfo; these wrap the same values so the
+// behavioral tests below can assert without their own public accessors.
+
+func remaining(s *State) time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.getTimeLeftLocked()
+}
+
+func isFocusing(s *State) bool { return s.GetCurrentFocusInfo().Focusing }
+
+func agentLocked(s *State) bool { return s.GetAgentLockInfo().TimeLeftSeconds == nil }
+
+func isBlocked(s *State) bool {
+	fi := s.GetCurrentFocusInfo()
+	return fi.Focusing || fi.AgentReleaseTimeLeft == nil
+}
+
 // TestTimeAccumulationImmediate tests that repeated immediate invocations add time
 func TestTimeAccumulationImmediate(t *testing.T) {
 	state := &State{}
 
 	// First invocation: 30 seconds
 	state.SetFocusing(30 * time.Second)
-	timeLeft1 := state.GetTimeLeft()
+	timeLeft1 := remaining(state)
 
 	// Should have approximately 30 seconds remaining
 	if timeLeft1 < 29*time.Second || timeLeft1 > 31*time.Second {
@@ -20,7 +39,7 @@ func TestTimeAccumulationImmediate(t *testing.T) {
 
 	// Second invocation: 30 seconds (immediate)
 	state.SetFocusing(30 * time.Second)
-	timeLeft2 := state.GetTimeLeft()
+	timeLeft2 := remaining(state)
 
 	// Should have approximately 60 seconds remaining (30 + 30)
 	if timeLeft2 < 59*time.Second || timeLeft2 > 61*time.Second {
@@ -44,22 +63,22 @@ func TestTimeAccumulationWithDelay(t *testing.T) {
 	// First invocation: 30 seconds
 	state.SetFocusing(30 * time.Second)
 
-	// Wait 5 seconds
-	time.Sleep(5 * time.Second)
+	// Wait 1 second
+	time.Sleep(1 * time.Second)
 
-	// Should have approximately 25 seconds remaining
-	timeLeft1 := state.GetTimeLeft()
-	if timeLeft1 < 24*time.Second || timeLeft1 > 26*time.Second {
-		t.Errorf("After 5 second delay, expected ~25s, got %v", timeLeft1)
+	// Should have approximately 29 seconds remaining
+	timeLeft1 := remaining(state)
+	if timeLeft1 < 28*time.Second || timeLeft1 > 30*time.Second {
+		t.Errorf("After 1 second delay, expected ~29s, got %v", timeLeft1)
 	}
 
 	// Second invocation: 30 seconds
 	state.SetFocusing(30 * time.Second)
-	timeLeft2 := state.GetTimeLeft()
+	timeLeft2 := remaining(state)
 
-	// Should have approximately 55 seconds remaining (25 + 30)
-	if timeLeft2 < 54*time.Second || timeLeft2 > 56*time.Second {
-		t.Errorf("After second invocation with delay, expected ~55s, got %v", timeLeft2)
+	// Should have approximately 59 seconds remaining (29 + 30)
+	if timeLeft2 < 58*time.Second || timeLeft2 > 60*time.Second {
+		t.Errorf("After second invocation with delay, expected ~59s, got %v", timeLeft2)
 	}
 }
 
@@ -73,7 +92,7 @@ func TestMultipleInvocations(t *testing.T) {
 	state.SetFocusing(20 * time.Second)
 	state.SetFocusing(30 * time.Second)
 
-	timeLeft := state.GetTimeLeft()
+	timeLeft := remaining(state)
 
 	// Should have approximately 60 seconds remaining (10 + 20 + 30)
 	if timeLeft < 59*time.Second || timeLeft > 61*time.Second {
@@ -118,7 +137,7 @@ func TestFirstInvocationUsesCurrentTime(t *testing.T) {
 func TestTimeLeftWithNoFocusRequests(t *testing.T) {
 	state := &State{}
 
-	timeLeft := state.GetTimeLeft()
+	timeLeft := remaining(state)
 
 	// Should return 0 when no active focus requests
 	if timeLeft != 0 {
@@ -131,28 +150,28 @@ func TestIsFocusingDerived(t *testing.T) {
 	state := &State{}
 
 	// Initially not focusing (no requests)
-	if state.IsFocusing() {
+	if isFocusing(state) {
 		t.Error("Expected IsFocusing() to be false with no requests")
 	}
 
-	// Add a focus request
-	state.SetFocusing(30 * time.Second)
+	// Add a short focus request
+	state.SetFocusing(1 * time.Second)
 
 	// Should now be focusing
-	if !state.IsFocusing() {
+	if !isFocusing(state) {
 		t.Error("Expected IsFocusing() to be true with active request")
 	}
 
 	// Wait for request to expire
-	time.Sleep(31 * time.Second)
+	time.Sleep(1200 * time.Millisecond)
 
 	// Should automatically not be focusing (request expired)
-	if state.IsFocusing() {
+	if isFocusing(state) {
 		t.Error("Expected IsFocusing() to be false after request expired")
 	}
 
 	// Verify time left is also 0
-	if state.GetTimeLeft() != 0 {
-		t.Errorf("Expected 0 time left after expiration, got %v", state.GetTimeLeft())
+	if remaining(state) != 0 {
+		t.Errorf("Expected 0 time left after expiration, got %v", remaining(state))
 	}
 }

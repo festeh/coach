@@ -11,7 +11,7 @@ import (
 func TestAgentLockDefaultEngaged(t *testing.T) {
 	state := &State{}
 
-	if !state.IsAgentLocked() {
+	if !agentLocked(state) {
 		t.Error("Fresh state should be agent-locked by default")
 	}
 
@@ -25,7 +25,7 @@ func TestReleaseAgentLockUnlocksAndAutoLocks(t *testing.T) {
 	state := &State{}
 
 	state.ReleaseAgentLock(100 * time.Millisecond)
-	if state.IsAgentLocked() {
+	if agentLocked(state) {
 		t.Error("Expected agent lock to be released")
 	}
 	if info := state.GetAgentLockInfo(); info.TimeLeftSeconds == nil {
@@ -33,7 +33,7 @@ func TestReleaseAgentLockUnlocksAndAutoLocks(t *testing.T) {
 	}
 
 	time.Sleep(200 * time.Millisecond)
-	if !state.IsAgentLocked() {
+	if !agentLocked(state) {
 		t.Error("Expected agent lock to engage again after release expired")
 	}
 }
@@ -69,12 +69,12 @@ func TestEngageAgentLockCancelsRelease(t *testing.T) {
 	state := &State{}
 
 	state.ReleaseAgentLock(5 * time.Second)
-	if state.IsAgentLocked() {
+	if agentLocked(state) {
 		t.Fatal("Sanity check: should be released here")
 	}
 
 	state.EngageAgentLock()
-	if !state.IsAgentLocked() {
+	if !agentLocked(state) {
 		t.Error("EngageAgentLock should re-engage the lock immediately")
 	}
 
@@ -89,22 +89,22 @@ func TestEngageAgentLockCancelsRelease(t *testing.T) {
 func TestIsBlockedCombinesBothLocks(t *testing.T) {
 	state := &State{}
 
-	if !state.IsBlocked() {
+	if !isBlocked(state) {
 		t.Error("Fresh state should be blocked (default-engaged agent lock)")
 	}
 
 	state.ReleaseAgentLock(5 * time.Second)
-	if state.IsBlocked() {
+	if isBlocked(state) {
 		t.Error("With agent lock released and no manual focus, should not be blocked")
 	}
 
 	state.SetFocusing(5 * time.Second)
-	if !state.IsBlocked() {
+	if !isBlocked(state) {
 		t.Error("Manual focus alone should block, regardless of agent lock state")
 	}
 
 	state.EngageAgentLock()
-	if !state.IsBlocked() {
+	if !isBlocked(state) {
 		t.Error("Both locks engaged should still be blocked")
 	}
 }
@@ -115,7 +115,7 @@ func TestRestoreAgentLockFromFutureTime(t *testing.T) {
 	until := time.Now().Add(2 * time.Second)
 	state.RestoreAgentLock(&until)
 
-	if state.IsAgentLocked() {
+	if agentLocked(state) {
 		t.Error("Restored future release should leave the lock unlocked")
 	}
 
@@ -133,7 +133,7 @@ func TestRestoreAgentLockFromPastTimeIsNoOp(t *testing.T) {
 	past := time.Now().Add(-1 * time.Second)
 	state.RestoreAgentLock(&past)
 
-	if !state.IsAgentLocked() {
+	if !agentLocked(state) {
 		t.Error("Restoring a past release should leave the lock engaged")
 	}
 }
@@ -149,7 +149,7 @@ func TestAgentLockReleaseEndpoint(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("Expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
-	if server.State.IsAgentLocked() {
+	if agentLocked(server.State) {
 		t.Error("State should be released after /release")
 	}
 }
@@ -180,7 +180,7 @@ func TestAgentLockEngageEndpoint(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("Expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
-	if !server.State.IsAgentLocked() {
+	if !agentLocked(server.State) {
 		t.Error("State should be locked after /engage")
 	}
 }

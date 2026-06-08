@@ -32,21 +32,6 @@ type State struct {
 	agentLockTimer    *time.Timer
 }
 
-// NewState creates a properly initialized State instance
-func NewState(s *stats.Stats) *State {
-	return &State{
-		clients: make(map[*websocket.Conn]bool),
-		stats:   s,
-	}
-}
-
-// IsFocusing returns true if there is remaining focus time (thread-safe)
-func (s *State) IsFocusing() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.getTimeLeftLocked() > 0
-}
-
 type FocusInfo struct {
 	Type                 string        `json:"type"`
 	Focusing             bool          `json:"focusing"`
@@ -85,20 +70,6 @@ func (s *State) GetAgentLockInfo() AgentLockInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return AgentLockInfo{TimeLeftSeconds: s.agentReleaseTimeLeftLocked()}
-}
-
-// IsAgentLocked returns true if no release window is active.
-func (s *State) IsAgentLocked() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.isAgentLockedLocked()
-}
-
-// IsBlocked returns true when either lock is engaged.
-func (s *State) IsBlocked() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.getTimeLeftLocked() > 0 || s.isAgentLockedLocked()
 }
 
 // ReleaseAgentLock unlocks the agent lock for d. If a release is already active and ends
@@ -374,19 +345,6 @@ func (s *State) getTimeLeftLocked() time.Duration {
 		}
 	}
 	return latestEndTime.Sub(now)
-}
-
-// GetTimeLeft returns the remaining focus time (thread-safe)
-func (s *State) GetTimeLeft() time.Duration {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.getTimeLeftLocked()
-}
-
-func (s *State) HasClients() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.clients) > 0
 }
 
 func (s *State) AddClient(client *websocket.Conn) {
