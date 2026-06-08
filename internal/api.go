@@ -125,6 +125,15 @@ func (s *Server) AgentLockHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.State.ReleaseAgentLock(time.Duration(duration) * time.Second)
+
+		// Journal the decision. The override flag lives only on the wire; the
+		// stored kind carries it.
+		kind := "grant"
+		if r.FormValue("is_override") == "true" {
+			kind = "override"
+		}
+		s.logLockDecision(kind, r.FormValue("user_message"), r.FormValue("agent_message"), duration)
+
 		writeJSON(w, s.State.GetAgentLockInfo())
 
 	case "/agent-lock/engage":
@@ -135,9 +144,124 @@ func (s *Server) AgentLockHandler(w http.ResponseWriter, r *http.Request) {
 		s.State.EngageAgentLock()
 		writeJSON(w, s.State.GetAgentLockInfo())
 
+	case "/agent-lock/state":
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.writeLockState(w)
+
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// logLockDecision writes a decision row, best-effort and asynchronous. A failure
+// (or a missing DB in tests) loses the journal row, never the lock action.
+func (s *Server) logLockDecision(kind, userMessage, agentMessage string, durationSeconds int) {
+	if s.DBManager == nil {
+		return
+	}
+	go func() {
+		if err := s.DBManager.InsertLockDecision(kind, "agent", userMessage, agentMessage, durationSeconds); err != nil {
+			log.Error("Failed to journal lock decision", "kind", kind, "error", err)
+		}
+	}()
+}
+
+// writeLockState answers GET /agent-lock/state from today's journal: total
+// released seconds, override count, and the most recent decisions.
+func (s *Server) writeLockState(w http.ResponseWriter) {
+	type recentEntry struct {
+		At              string `json:"at"`
+		Kind            string `json:"kind"`
+		UserMessage     string `json:"user_message"`
+		AgentMessage    string `json:"agent_message"`
+		DurationSeconds int    `json:"duration_seconds"`
+	}
+	out := struct {
+		ReleasedSecondsToday int           `json:"released_seconds_today"`
+		OverrideCountToday   int           `json:"override_count_today"`
+		Recent               []recentEntry `json:"recent"`
+	}{Recent: []recentEntry{}}
+
+	if s.DBManager == nil {
+		writeJSON(w, out)
+		return
+	}
+
+	decisions, err := s.DBManager.GetTodayLockDecisions()
+	if err != nil {
+		log.Error("Failed to read lock decisions", "err", err)
+		http.Error(w, "Failed to read lock decisions", http.StatusInternalServerError)
+		return
+	}
+
+	for _, d := range decisions {
+		if d.Kind == "grant" || d.Kind == "override" {
+			out.ReleasedSecondsToday += d.DurationSeconds
+		}
+		if d.Kind == "override" {
+			out.OverrideCountToday++
+		}
+	}
+
+	// Last 5, newest first (decisions arrive oldest-first).
+	start := len(decisions) - 5
+	if start < 0 {
+		start = 0
+	}
+	for i := len(decisions) - 1; i >= start; i-- {
+		d := decisions[i]
+		out.Recent = append(out.Recent, recentEntry{
+			At:              d.Created,
+			Kind:            d.Kind,
+			UserMessage:     d.UserMessage,
+			AgentMessage:    d.AgentMessage,
+			DurationSeconds: d.DurationSeconds,
+		})
+	}
+
+	writeJSON(w, out)
+}
+
+// @Summary Record a lock denial
+// @Description The coach agent posts here when it refuses a release request.
+// @Description Grants, overrides, and engages go through the lock endpoints
+// @Description that actually change state; this endpoint is denials only.
+// @Tags agent-lock
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]bool
+// @Failure 400 {string} string "Bad request"
+// @Failure 405 {string} string "Method not allowed"
+// @Router /lock-decisions [post]
+func (s *Server) LockDecisionsHandler(w http.ResponseWriter, r *http.Request) {
+	log.Info("Called /lock-decisions", "method", r.Method)
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Kind         string `json:"kind"`
+		UserMessage  string `json:"user_message"`
+		AgentMessage string `json:"agent_message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	// Kind is implied: this endpoint only records denials. A caller setting
+	// kind is confused about what this endpoint does.
+	if body.Kind != "" {
+		http.Error(w, "kind is not accepted here; this endpoint records denials only", http.StatusBadRequest)
+		return
+	}
+
+	s.logLockDecision("denial", body.UserMessage, body.AgentMessage, 0)
+	writeJSON(w, map[string]bool{"ok": true})
 }
 
 // @Summary Get focus history

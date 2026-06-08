@@ -62,6 +62,11 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 	} else if created {
 		log.Info("Created attention collection")
 	}
+	if created, err := dbManager.EnsureLockDecisionsCollection(); err != nil {
+		log.Warn("Failed to ensure lock_decisions collection — lock decisions won't be journaled", "error", err)
+	} else if created {
+		log.Info("Created lock_decisions collection")
+	}
 	server.AttentionTracker = NewAttentionTracker(dbManager)
 
 	stats, err := stats.New(dbManager)
@@ -118,6 +123,8 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/agent-lock", s.AgentLockHandler)
 	mux.HandleFunc("/agent-lock/release", s.AgentLockHandler)
 	mux.HandleFunc("/agent-lock/engage", s.AgentLockHandler)
+	mux.HandleFunc("/agent-lock/state", s.AgentLockHandler)
+	mux.HandleFunc("/lock-decisions", s.LockDecisionsHandler)
 	mux.Handle("/admin/", s.AdminHandler())
 
 	return corsMiddleware(mux)
