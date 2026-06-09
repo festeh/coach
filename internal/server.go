@@ -60,6 +60,11 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 	} else if created {
 		log.Info("Created lock_decisions collection")
 	}
+	if created, err := dbManager.EnsureTemptationsCollection(); err != nil {
+		log.Warn("Failed to ensure temptations collection — temptations won't be recorded", "error", err)
+	} else if created {
+		log.Info("Created temptations collection")
+	}
 	server.AttentionTracker = NewAttentionTracker(dbManager)
 
 	stats, err := stats.New(dbManager)

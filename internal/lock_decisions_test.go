@@ -51,11 +51,22 @@ func TestLockStateEmptyWithoutDB(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("Expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
-	for _, want := range []string{`"released_seconds_today":0`, `"override_count_today":0`, `"recent":[]`} {
+	for _, want := range []string{
+		`"released_seconds_today":0`,
+		`"override_count_today":0`,
+		`"temptation_count_today":0`,
+		`"recent":[]`,
+	} {
 		if !strings.Contains(rr.Body.String(), want) {
 			t.Errorf("expected %s in %s", want, rr.Body.String())
 		}
 	}
+}
+
+func TestLogTemptationNoPanicWithoutDB(t *testing.T) {
+	server := &Server{State: &State{}}
+	// nil DBManager must be a no-op, not a panic.
+	server.logTemptation("chromium", "reddit.com")
 }
 
 func TestLockDecisionsRecordsDenial(t *testing.T) {

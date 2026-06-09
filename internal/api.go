@@ -169,6 +169,19 @@ func (s *Server) logLockDecision(kind, userMessage, agentMessage string, duratio
 	}()
 }
 
+// logTemptation records one blocked attempt, best-effort and asynchronous. A
+// failure (or a missing DB in tests) loses the row, never anything else.
+func (s *Server) logTemptation(source, target string) {
+	if s.DBManager == nil {
+		return
+	}
+	go func() {
+		if err := s.DBManager.InsertTemptation(source, target); err != nil {
+			log.Error("Failed to record temptation", "source", source, "error", err)
+		}
+	}()
+}
+
 // writeLockState answers GET /agent-lock/state from today's journal: total
 // released seconds, override count, and the most recent decisions.
 func (s *Server) writeLockState(w http.ResponseWriter) {
@@ -182,12 +195,21 @@ func (s *Server) writeLockState(w http.ResponseWriter) {
 	out := struct {
 		ReleasedSecondsToday int           `json:"released_seconds_today"`
 		OverrideCountToday   int           `json:"override_count_today"`
+		TemptationCountToday int           `json:"temptation_count_today"`
 		Recent               []recentEntry `json:"recent"`
 	}{Recent: []recentEntry{}}
 
 	if s.DBManager == nil {
 		writeJSON(w, out)
 		return
+	}
+
+	// The temptation tally is supporting context; a failure here logs and
+	// falls back to 0 rather than sinking the whole lock-state read.
+	if count, err := s.DBManager.CountTodayTemptations(); err != nil {
+		log.Error("Failed to count temptations", "err", err)
+	} else {
+		out.TemptationCountToday = count
 	}
 
 	decisions, err := s.DBManager.GetTodayLockDecisions()
@@ -389,6 +411,8 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 			Duration int    `json:"duration,omitempty"`
 			State    string `json:"state,omitempty"`
 			Site     string `json:"site,omitempty"`
+			Source   string `json:"source,omitempty"`
+			Target   string `json:"target,omitempty"`
 		}
 
 		if err := json.Unmarshal(buf, &message); err != nil {
@@ -414,6 +438,14 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 				s.AttentionTracker.Handle(message.State, message.Site)
 			default:
 				log.Warn("Invalid attention state", "state", message.State)
+			}
+		case "temptation":
+			// source is an open label set by the client (chromium, firefox,
+			// android, …); a new client must not need a server change.
+			if message.Source == "" || message.Target == "" {
+				log.Warn("Invalid temptation", "source", message.Source, "target", message.Target)
+			} else {
+				s.logTemptation(message.Source, message.Target)
 			}
 		case "ping":
 			// "type" is what current clients match on; "response" is kept for
