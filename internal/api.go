@@ -402,7 +402,17 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 	for {
 		_, buf, err := conn.ReadMessage()
 		if err != nil {
-			log.Error("Error reading message", "err", err)
+			// Clients come and go: extensions close normally, browsers send
+			// going-away on shutdown, phones drop without a close frame.
+			if websocket.IsCloseError(err,
+				websocket.CloseNormalClosure,
+				websocket.CloseGoingAway,
+				websocket.CloseNoStatusReceived,
+				websocket.CloseAbnormalClosure) {
+				log.Info("Client disconnected", "reason", err)
+			} else {
+				log.Error("Error reading message", "err", err)
+			}
 			return
 		}
 
