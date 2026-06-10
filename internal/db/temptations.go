@@ -18,10 +18,10 @@ import (
 var temptationsCollection = Collection{
 	Name: "temptations",
 	Type: "base",
-	Fields: []Field{
+	Fields: append([]Field{
 		{Name: "source", Type: "text", Required: true},
 		{Name: "target", Type: "text", Required: false},
-	},
+	}, TimestampFields()...),
 }
 
 // EnsureTemptationsCollection creates the temptations collection if it doesn't

@@ -41,17 +41,17 @@ func collections() []db.Collection {
 			Name: "coach",
 			Type: "base",
 			Fields: []db.Field{
-				{Name: "timestamp", Type: "date", Required: true, Options: map[string]any{"min": nil, "max": nil}},
-				{Name: "duration", Type: "number", Required: true, Options: map[string]any{"min": 0, "max": nil}},
+				{Name: "timestamp", Type: "date", Required: true},
+				{Name: "duration", Type: "number", Required: true},
 			},
 			Indexes: []string{"CREATE UNIQUE INDEX `ts_index` ON `coach` (`timestamp`)"},
 		},
 		{
 			Name: "agent_lock",
 			Type: "base",
-			Fields: []db.Field{
+			Fields: append([]db.Field{
 				{Name: "release_until", Type: "text", Required: false},
-			},
+			}, db.TimestampFields()...),
 		},
 	}
 }

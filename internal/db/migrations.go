@@ -21,7 +21,18 @@ type Field struct {
 	Name     string `json:"name"`
 	Type     string `json:"type"`
 	Required bool   `json:"required"`
-	Options  any    `json:"options,omitempty"`
+	OnCreate bool   `json:"onCreate,omitempty"` // autodate: stamp when the record is created
+	OnUpdate bool   `json:"onUpdate,omitempty"` // autodate: restamp when the record is updated
+}
+
+// TimestampFields returns the created/updated autodate fields. PocketBase
+// 0.23+ no longer adds these to new collections implicitly, so any collection
+// whose queries filter or sort on created must declare them.
+func TimestampFields() []Field {
+	return []Field{
+		{Name: "created", Type: "autodate", OnCreate: true},
+		{Name: "updated", Type: "autodate", OnCreate: true, OnUpdate: true},
+	}
 }
 
 // CollectionExists returns true if a collection with the given name is registered in PB.

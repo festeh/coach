@@ -20,9 +20,9 @@ type AgentLockRecord struct {
 var agentLockCollection = Collection{
 	Name: "agent_lock",
 	Type: "base",
-	Fields: []Field{
+	Fields: append([]Field{
 		{Name: "release_until", Type: "text", Required: false},
-	},
+	}, TimestampFields()...),
 }
 
 // EnsureAgentLockCollection creates the agent_lock collection if it doesn't exist.

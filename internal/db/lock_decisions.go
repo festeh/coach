@@ -20,13 +20,13 @@ import (
 var lockDecisionsCollection = Collection{
 	Name: "lock_decisions",
 	Type: "base",
-	Fields: []Field{
+	Fields: append([]Field{
 		{Name: "kind", Type: "text", Required: true},
 		{Name: "source", Type: "text", Required: false},
 		{Name: "user_message", Type: "text", Required: false},
 		{Name: "agent_message", Type: "text", Required: false},
 		{Name: "duration_seconds", Type: "number", Required: false},
-	},
+	}, TimestampFields()...),
 }
 
 // EnsureLockDecisionsCollection creates the lock_decisions collection if it
