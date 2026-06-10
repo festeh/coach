@@ -117,6 +117,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/focusing", s.FocusHandler)
 	mux.HandleFunc("/history", s.HistoryHandler)
 	mux.HandleFunc("/attention", s.AttentionHandler)
+	mux.HandleFunc("/attention/summary", s.AttentionSummaryHandler)
 	mux.HandleFunc("/connect", s.WebsocketHandler)
 	mux.HandleFunc("/agent-lock", s.AgentLockHandler)
 	mux.HandleFunc("/agent-lock/release", s.AgentLockHandler)

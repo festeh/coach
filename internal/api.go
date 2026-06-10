@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"time"
 
+	"coach/internal/stats"
+
 	"github.com/charmbracelet/log"
 	"github.com/gorilla/websocket"
 )
@@ -369,6 +371,39 @@ func (s *Server) AttentionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, intervals)
+}
+
+// @Summary Today's attention summary
+// @Description What has the user's attention right now, and where today's site time went
+// @Tags attention
+// @Produce json
+// @Success 200 {object} stats.AttentionSummary
+// @Failure 500 {string} string "Internal server error"
+// @Router /attention/summary [get]
+func (s *Server) AttentionSummaryHandler(w http.ResponseWriter, r *http.Request) {
+	log.Info("Called /attention/summary", "method", r.Method)
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	now := time.Now()
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	if s.DBManager == nil {
+		writeJSON(w, stats.SummarizeAttention(nil, dayStart, now))
+		return
+	}
+
+	intervals, err := s.DBManager.GetAttentionIntervals(dayStart, now)
+	if err != nil {
+		log.Error("Failed to get attention intervals", "err", err)
+		http.Error(w, "Failed to get attention intervals", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, stats.SummarizeAttention(intervals, dayStart, now))
 }
 
 // @Summary WebSocket connection endpoint
