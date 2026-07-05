@@ -458,6 +458,7 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 			Site     string `json:"site,omitempty"`
 			Source   string `json:"source,omitempty"`
 			Target   string `json:"target,omitempty"`
+			Message  string `json:"message,omitempty"`
 		}
 
 		if err := json.Unmarshal(buf, &message); err != nil {
@@ -491,6 +492,16 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 				log.Warn("Invalid temptation", "source", message.Source, "target", message.Target)
 			} else {
 				s.logTemptation(message.Source, message.Target)
+			}
+		case "override":
+			// The escape hatch: a fixed 15 minutes, priced at a written reason.
+			// The release broadcast tells every client; the journal tells the judge.
+			if message.Message == "" {
+				log.Warn("Override without a reason ignored")
+			} else {
+				const overrideSeconds = 15 * 60
+				s.State.ReleaseAgentLock(overrideSeconds * time.Second)
+				s.logLockDecision("override", message.Message, "", overrideSeconds)
 			}
 		case "ping":
 			// "type" is what current clients match on; "response" is kept for
