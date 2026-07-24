@@ -1,436 +1,238 @@
 package db
 
 import (
-	"encoding/json"
+	"context"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"os"
-	"strings"
 	"time"
 
-	"github.com/charmbracelet/log"
-	"github.com/joho/godotenv"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const (
-	loginEndpoint = "/api/collections/_superusers/auth-with-password"
-	envFile       = ".env"
-)
+const queryTimeout = 10 * time.Second
 
-// AuthResponse represents the authentication response from PocketBase
-type AuthResponse struct {
-	Token string `json:"token"`
-	Admin struct {
-		ID    string `json:"id"`
-		Email string `json:"email"`
-	} `json:"admin"`
-}
-
-// ErrorResponse represents an error response from PocketBase
-type ErrorResponse struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Data    any    `json:"data"`
-}
-
-// FocusRecord represents a focus session record
+// FocusRecord is one persisted focus session.
 type FocusRecord struct {
 	Timestamp time.Time `json:"timestamp"`
 	Duration  int       `json:"duration"`
 }
 
-// Manager handles database operations and authentication
+// Manager owns Coach's PostgreSQL connection pool and queries.
 type Manager struct {
-	BaseURL   string
-	AuthToken string
-	Client    *http.Client
-	email     string
-	password  string
+	pool *pgxpool.Pool
 }
 
-// InitManager initializes a new database manager
-// It loads credentials from the .env file and authenticates with PocketBase
+// InitManager connects to the dedicated Coach database and applies idempotent
+// schema migrations. DATABASE_URL is supplied by the protected runtime file.
 func InitManager() (*Manager, error) {
-	// Load environment variables from .env file
-	if err := godotenv.Load(envFile); err != nil {
-		return nil, fmt.Errorf("failed to load .env file: %w", err)
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return nil, errors.New("DATABASE_URL is required")
 	}
 
-	// Get credentials from environment variables
-	pbURL := os.Getenv("PB_URL")
-	pbEmail := os.Getenv("PB_EMAIL")
-	pbPassword := os.Getenv("PB_PASSWORD")
-
-	// Validate credentials
-	if pbURL == "" || pbEmail == "" || pbPassword == "" {
-		return nil, fmt.Errorf("missing required environment variables: PB_URL, PB_EMAIL, PB_PASSWORD")
-	}
-
-	// Ensure URL has proper format
-	baseURL := pbURL
-	if !strings.HasPrefix(baseURL, "http") {
-		baseURL = "http://" + baseURL
-	}
-	if strings.HasSuffix(baseURL, "/") {
-		baseURL = baseURL[:len(baseURL)-1]
-	}
-
-	// Create manager
-	manager := &Manager{
-		BaseURL:  baseURL,
-		Client:   &http.Client{Timeout: 10 * time.Second},
-		email:    pbEmail,
-		password: pbPassword,
-	}
-
-	// Authenticate
-	token, err := manager.authenticate()
+	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("authentication failed: %w", err)
+		return nil, fmt.Errorf("parse DATABASE_URL: %w", err)
+	}
+	config.MaxConns = 5
+	config.MinConns = 1
+	config.MaxConnIdleTime = 5 * time.Minute
+
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	defer cancel()
+
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		return nil, fmt.Errorf("create PostgreSQL pool: %w", err)
 	}
 
-	manager.AuthToken = token
-	log.Info("Database manager initialized successfully")
+	manager := &Manager{pool: pool}
+	if err := manager.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("connect to PostgreSQL: %w", err)
+	}
+	if err := manager.migrate(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("migrate PostgreSQL schema: %w", err)
+	}
 	return manager, nil
 }
 
-func (m *Manager) GetTodayFocusCount() (int, error) {
-	log.Info("Getting today's focus count")
-	today := time.Now().Format("2006-01-02")
-
-	baseEndpoint := fmt.Sprintf("%s/api/collections/coach/records", m.BaseURL)
-	u, err := url.Parse(baseEndpoint)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse URL: %w", err)
+// Close releases every PostgreSQL connection owned by Coach.
+func (m *Manager) Close() {
+	if m != nil && m.pool != nil {
+		m.pool.Close()
 	}
-
-	q := u.Query()
-	filter := fmt.Sprintf("timestamp ~ '%s'", today)
-	q.Set("filter", filter)
-	u.RawQuery = q.Encode()
-
-	fullURL := u.String()
-
-	req, err := http.NewRequest("GET", fullURL, nil)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", m.AuthToken)
-
-	resp, err := m.Client.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		var errResp ErrorResponse
-		if err := json.Unmarshal(body, &errResp); err != nil {
-			return 0, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
-		}
-		return 0, fmt.Errorf("request failed: %s", errResp.Message)
-	}
-
-	// Parse the response to count today's focus sessions
-	var result struct {
-		Items []struct {
-			ID        string `json:"id"`
-			Timestamp string `json:"timestamp"`
-			Duration  int    `json:"duration"`
-		} `json:"items"`
-		TotalItems int `json:"totalItems"`
-	}
-
-	if err := json.Unmarshal(body, &result); err != nil {
-		return 0, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	log.Info("Found focus sessions", "count", result.TotalItems)
-	return result.TotalItems, nil
 }
 
-// GetActiveFocus returns the remaining duration if a focus session is still active (timestamp + duration > now).
-// Returns 0 if no active session exists.
-func (m *Manager) GetActiveFocus() (time.Duration, error) {
-	log.Info("Checking for active focus session")
+// Ping verifies that the database is reachable.
+func (m *Manager) Ping(ctx context.Context) error {
+	return m.pool.Ping(ctx)
+}
 
-	baseEndpoint := fmt.Sprintf("%s/api/collections/coach/records", m.BaseURL)
-	u, err := url.Parse(baseEndpoint)
+func (m *Manager) migrate(ctx context.Context) error {
+	tx, err := m.pool.Begin(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse URL: %w", err)
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS focus_sessions (
+			id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+			started_at TIMESTAMPTZ NOT NULL UNIQUE,
+			duration_seconds INTEGER NOT NULL CHECK (duration_seconds > 0),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)`,
+		`CREATE INDEX IF NOT EXISTS focus_sessions_started_at_idx
+			ON focus_sessions (started_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS agent_lock (
+			singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+			release_until TIMESTAMPTZ,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)`,
+		`INSERT INTO agent_lock (singleton) VALUES (TRUE)
+			ON CONFLICT (singleton) DO NOTHING`,
+		`CREATE TABLE IF NOT EXISTS attention_intervals (
+			id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+			state TEXT NOT NULL CHECK (state IN ('site', 'idle', 'away')),
+			site TEXT NOT NULL DEFAULT '',
+			started_at TIMESTAMPTZ NOT NULL,
+			last_seen TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			CHECK (last_seen >= started_at)
+		)`,
+		`CREATE INDEX IF NOT EXISTS attention_intervals_window_idx
+			ON attention_intervals (last_seen DESC, started_at)`,
+		`CREATE TABLE IF NOT EXISTS lock_decisions (
+			id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+			kind TEXT NOT NULL CHECK (kind IN ('grant', 'override', 'denial')),
+			source TEXT NOT NULL DEFAULT '',
+			user_message TEXT NOT NULL DEFAULT '',
+			agent_message TEXT NOT NULL DEFAULT '',
+			duration_seconds INTEGER NOT NULL DEFAULT 0 CHECK (duration_seconds >= 0),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)`,
+		`CREATE INDEX IF NOT EXISTS lock_decisions_created_at_idx
+			ON lock_decisions (created_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS temptations (
+			id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+			source TEXT NOT NULL,
+			target TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)`,
+		`CREATE INDEX IF NOT EXISTS temptations_created_at_idx
+			ON temptations (created_at DESC)`,
 	}
 
-	q := u.Query()
-	q.Set("sort", "-timestamp")
-	q.Set("perPage", "1")
-	u.RawQuery = q.Encode()
-
-	req, err := http.NewRequest("GET", u.String(), nil)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", m.AuthToken)
-
-	resp, err := m.Client.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		var errResp ErrorResponse
-		if err := json.Unmarshal(body, &errResp); err != nil {
-			return 0, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+	for _, statement := range statements {
+		if _, err := tx.Exec(ctx, statement); err != nil {
+			return err
 		}
-		return 0, fmt.Errorf("request failed: %s", errResp.Message)
 	}
+	return tx.Commit(ctx)
+}
 
-	var result struct {
-		Items []struct {
-			Timestamp string `json:"timestamp"`
-			Duration  int    `json:"duration"`
-		} `json:"items"`
+func operationContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), queryTimeout)
+}
+
+func localDayBounds(now time.Time) (time.Time, time.Time) {
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	return start, start.AddDate(0, 0, 1)
+}
+
+// AddFocusRecord persists one focus session.
+func (m *Manager) AddFocusRecord(startedAt time.Time, durationSeconds int) error {
+	if durationSeconds <= 0 {
+		return errors.New("focus duration must be positive")
 	}
+	ctx, cancel := operationContext()
+	defer cancel()
 
-	if err := json.Unmarshal(body, &result); err != nil {
-		return 0, fmt.Errorf("failed to parse response: %w", err)
-	}
+	_, err := m.pool.Exec(ctx, `
+		INSERT INTO focus_sessions (started_at, duration_seconds)
+		VALUES ($1, $2)
+		ON CONFLICT (started_at) DO UPDATE
+		SET duration_seconds = EXCLUDED.duration_seconds
+	`, startedAt, durationSeconds)
+	return err
+}
 
-	if len(result.Items) == 0 {
+// GetTodayFocusCount returns the number of sessions started today in the
+// server's configured local timezone.
+func (m *Manager) GetTodayFocusCount() (int, error) {
+	start, end := localDayBounds(time.Now())
+	ctx, cancel := operationContext()
+	defer cancel()
+
+	var count int
+	err := m.pool.QueryRow(ctx, `
+		SELECT count(*) FROM focus_sessions
+		WHERE started_at >= $1 AND started_at < $2
+	`, start, end).Scan(&count)
+	return count, err
+}
+
+// GetActiveFocus returns the remaining duration of the newest unexpired focus
+// session, or zero when no focus is active.
+func (m *Manager) GetActiveFocus() (time.Duration, error) {
+	ctx, cancel := operationContext()
+	defer cancel()
+
+	var startedAt time.Time
+	var durationSeconds int
+	err := m.pool.QueryRow(ctx, `
+		SELECT started_at, duration_seconds
+		FROM focus_sessions
+		ORDER BY started_at DESC
+		LIMIT 1
+	`).Scan(&startedAt, &durationSeconds)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, nil
 	}
-
-	item := result.Items[0]
-	ts, err := time.Parse("2006-01-02 15:04:05.000Z", item.Timestamp)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse timestamp: %w", err)
+		return 0, err
 	}
 
-	endTime := ts.Add(time.Duration(item.Duration) * time.Second)
-	remaining := time.Until(endTime)
+	remaining := time.Until(startedAt.Add(time.Duration(durationSeconds) * time.Second))
 	if remaining <= 0 {
 		return 0, nil
 	}
-
-	log.Info("Found active focus session", "remaining", remaining)
 	return remaining, nil
 }
 
-// GetFocusHistory returns focus records for the last N days
+// GetFocusHistory returns focus sessions since the local midnight N days ago,
+// newest first.
 func (m *Manager) GetFocusHistory(days int) ([]FocusRecord, error) {
-	log.Info("Getting focus history", "days", days)
-
-	// Calculate the start date
-	startDate := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
-
-	baseEndpoint := fmt.Sprintf("%s/api/collections/coach/records", m.BaseURL)
-	u, err := url.Parse(baseEndpoint)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse URL: %w", err)
+	if days < 1 {
+		days = 7
 	}
+	start, _ := localDayBounds(time.Now().AddDate(0, 0, -days))
+	ctx, cancel := operationContext()
+	defer cancel()
 
-	q := u.Query()
-	filter := fmt.Sprintf("timestamp >= '%s 00:00:00'", startDate)
-	q.Set("filter", filter)
-	q.Set("sort", "-timestamp")
-	q.Set("perPage", "500") // Get up to 500 records
-	u.RawQuery = q.Encode()
-
-	fullURL := u.String()
-
-	req, err := http.NewRequest("GET", fullURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", m.AuthToken)
-
-	resp, err := m.Client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		var errResp ErrorResponse
-		if err := json.Unmarshal(body, &errResp); err != nil {
-			return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
-		}
-		return nil, fmt.Errorf("request failed: %s", errResp.Message)
-	}
-
-	var result struct {
-		Items []struct {
-			ID        string `json:"id"`
-			Timestamp string `json:"timestamp"`
-			Duration  int    `json:"duration"`
-		} `json:"items"`
-		TotalItems int `json:"totalItems"`
-	}
-
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	// Convert to FocusRecord slice
-	records := make([]FocusRecord, 0, len(result.Items))
-	for _, item := range result.Items {
-		// PocketBase uses "2006-01-02 15:04:05.000Z" format
-		ts, err := time.Parse("2006-01-02 15:04:05.000Z", item.Timestamp)
-		if err != nil {
-			log.Warn("Failed to parse timestamp", "timestamp", item.Timestamp, "error", err)
-			continue
-		}
-		records = append(records, FocusRecord{
-			Timestamp: ts,
-			Duration:  item.Duration,
-		})
-	}
-
-	log.Info("Found focus records", "count", len(records))
-	return records, nil
-}
-
-// DoRequest executes an HTTP request with auth token and automatic token refresh on 401/403.
-func (m *Manager) DoRequest(req *http.Request) (*http.Response, error) {
-	return m.doRequestWithRetry(req, true)
-}
-
-func (m *Manager) doRequestWithRetry(req *http.Request, canRetry bool) (*http.Response, error) {
-	req.Header.Set("Authorization", m.AuthToken)
-
-	resp, err := m.Client.Do(req)
+	rows, err := m.pool.Query(ctx, `
+		SELECT started_at, duration_seconds
+		FROM focus_sessions
+		WHERE started_at >= $1
+		ORDER BY started_at DESC
+		LIMIT 500
+	`, start)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	if (resp.StatusCode == 401 || resp.StatusCode == 403) && canRetry {
-		resp.Body.Close()
-		log.Info("Auth token expired, refreshing...")
-		token, err := m.authenticate()
-		if err != nil {
-			return nil, fmt.Errorf("failed to refresh token: %w", err)
+	records := make([]FocusRecord, 0)
+	for rows.Next() {
+		var record FocusRecord
+		if err := rows.Scan(&record.Timestamp, &record.Duration); err != nil {
+			return nil, err
 		}
-		m.AuthToken = token
-		log.Info("Token refreshed, retrying request")
-		req.Header.Set("Authorization", m.AuthToken)
-		return m.doRequestWithRetry(req, false)
+		records = append(records, record)
 	}
-
-	return resp, nil
-}
-
-func (m *Manager) AddRecord(data map[string]any) error {
-	return m.addRecordWithRetry(data, true)
-}
-
-func (m *Manager) addRecordWithRetry(data map[string]any, canRetry bool) error {
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return fmt.Errorf("failed to marshal record data: %w", err)
-	}
-
-	endpoint := fmt.Sprintf("%s/api/collections/coach/records", m.BaseURL)
-	req, err := http.NewRequest("POST", endpoint, strings.NewReader(string(jsonData)))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", m.AuthToken)
-
-	resp, err := m.Client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	// Handle 401/403 by refreshing token and retrying once
-	if (resp.StatusCode == 401 || resp.StatusCode == 403) && canRetry {
-		log.Info("Auth token expired, refreshing...")
-		token, err := m.authenticate()
-		if err != nil {
-			return fmt.Errorf("failed to refresh token: %w", err)
-		}
-		m.AuthToken = token
-		log.Info("Token refreshed, retrying request")
-		return m.addRecordWithRetry(data, false)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var errResp ErrorResponse
-		if err := json.Unmarshal(body, &errResp); err != nil {
-			return fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
-		}
-		return fmt.Errorf("request failed: %s", errResp.Message)
-	}
-
-	return nil
-}
-
-func (m *Manager) authenticate() (string, error) {
-	data := map[string]string{
-		"identity": m.email,
-		"password": m.password,
-	}
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return "", err
-	}
-
-	req, err := http.NewRequest("POST", m.BaseURL+loginEndpoint, strings.NewReader(string(jsonData)))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := m.Client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		var errResp ErrorResponse
-		if err := json.Unmarshal(body, &errResp); err != nil {
-			return "", fmt.Errorf("authentication failed with status %d: %s", resp.StatusCode, string(body))
-		}
-		return "", fmt.Errorf("authentication failed: %s", errResp.Message)
-	}
-
-	var authResp AuthResponse
-	if err := json.Unmarshal(body, &authResp); err != nil {
-		return "", err
-	}
-
-	return authResp.Token, nil
+	return records, rows.Err()
 }

@@ -13,7 +13,7 @@ Changes to existing files:
 
 ```
 internal/
-├── server.go          # store dimaistClient, register new route
+├── server.go          # register new route
 ├── api_hooks.go       # add GET /api/hooks/{id}/context handler
 ├── hook_ai.go         # export GatherContext (rename from gatherContext)
 admin/
@@ -44,7 +44,6 @@ Routes:
 
 Returns the same context string that gets sent to the AI, so the user can preview it.
 
-- Store `dimaistClient` on `Server` struct (it's already created in `NewServer`, just not stored)
 - Export `GatherContext` (rename from `gatherContext`) so it can be called from the handler
 - Add a `context` action case in `HookByIDHandler` that builds a `HookContext` and calls `GatherContext`
 - Response: `{ "context": "## Focus Stats\n- Currently focusing: false\n..." }`
@@ -63,10 +62,6 @@ export async function fetchHookContext(hookId: string): Promise<string>
 ```
 
 Calls the new endpoint and returns the context string.
-
-## Risks
-
-- **dimaist client may not be available**: `gatherContext` already handles this gracefully (returns just focus stats). No risk.
 
 ## Open Questions
 

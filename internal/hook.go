@@ -26,19 +26,14 @@ func DatabaseHook(manager *db.Manager) Hook {
 
 		duration := request.EndTime.Sub(request.StartTime)
 
-		record := map[string]any{
-			"timestamp": request.StartTime.Format(time.RFC3339),
-			"duration":  int(duration.Seconds()),
-		}
-
 		go func() {
-			if err := manager.AddRecord(record); err != nil {
+			if err := manager.AddFocusRecord(request.StartTime, int(duration.Seconds())); err != nil {
 				log.Error("Failed to add focus record to database", "error", err)
 				return
 			}
 
 			log.Info("Focus record saved to database",
-				"timestamp", record["timestamp"],
+				"timestamp", request.StartTime.Format(time.RFC3339),
 				"duration", duration.String())
 		}()
 	}

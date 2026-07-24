@@ -7,6 +7,7 @@ main
 coach
 *.test
 *.out
+build/
 
 # Secrets
 inventory.ini

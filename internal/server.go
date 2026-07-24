@@ -44,31 +44,11 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 		return nil, err
 	}
 
-	// Auto-migrate collections owned by coach itself (not by the coach_db CLI).
-	if created, err := dbManager.EnsureAgentLockCollection(); err != nil {
-		log.Warn("Failed to ensure agent_lock collection — agent lock state won't persist", "error", err)
-	} else if created {
-		log.Info("Created agent_lock collection")
-	}
-	if created, err := dbManager.EnsureAttentionCollection(); err != nil {
-		log.Warn("Failed to ensure attention collection — attention beacons won't persist", "error", err)
-	} else if created {
-		log.Info("Created attention collection")
-	}
-	if created, err := dbManager.EnsureLockDecisionsCollection(); err != nil {
-		log.Warn("Failed to ensure lock_decisions collection — lock decisions won't be journaled", "error", err)
-	} else if created {
-		log.Info("Created lock_decisions collection")
-	}
-	if created, err := dbManager.EnsureTemptationsCollection(); err != nil {
-		log.Warn("Failed to ensure temptations collection — temptations won't be recorded", "error", err)
-	} else if created {
-		log.Info("Created temptations collection")
-	}
 	server.AttentionTracker = NewAttentionTracker(dbManager)
 
 	stats, err := stats.New(dbManager)
 	if err != nil {
+		dbManager.Close()
 		return nil, err
 	}
 
@@ -94,12 +74,19 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 	return server, nil
 }
 
+// Close releases external resources owned by the server.
+func (s *Server) Close() {
+	if s != nil && s.DBManager != nil {
+		s.DBManager.Close()
+	}
+}
+
 // corsMiddleware adds CORS headers to all responses
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
@@ -124,6 +111,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/agent-lock/engage", s.AgentLockHandler)
 	mux.HandleFunc("/agent-lock/state", s.AgentLockHandler)
 	mux.HandleFunc("/lock-decisions", s.LockDecisionsHandler)
+	mux.HandleFunc("/lock-decisions/stats", s.LockDecisionStatsHandler)
 	mux.Handle("/admin/", s.AdminHandler())
 
 	return corsMiddleware(mux)

@@ -1,58 +1,13 @@
 package db
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"strconv"
 	"time"
 )
 
-// attentionCollection is the schema for the attention collection. One record per
-// contiguous span of attention on the same (state, site).
-//
-//	state      (text) — "site", "idle" or "away"
-//	site       (text) — hostname, set only when state is "site"
-//	started_at (text) — RFC3339 timestamp of the first beacon of the span
-//	last_seen  (text) — RFC3339 timestamp of the latest beacon, bumped by heartbeats
-var attentionCollection = Collection{
-	Name: "attention",
-	Type: "base",
-	Fields: []Field{
-		{Name: "state", Type: "text", Required: true},
-		{Name: "site", Type: "text", Required: false},
-		{Name: "started_at", Type: "text", Required: true},
-		{Name: "last_seen", Type: "text", Required: true},
-	},
-}
-
-// EnsureAttentionCollection creates the attention collection if it doesn't exist.
-// Idempotent.
-func (m *Manager) EnsureAttentionCollection() (created bool, err error) {
-	return m.EnsureCollection(attentionCollection)
-}
-
-// CreateAttentionInterval opens a new attention interval and returns its record ID.
-func (m *Manager) CreateAttentionInterval(state, site string, at time.Time) (string, error) {
-	ts := at.UTC().Format(time.RFC3339)
-	return m.createRecord("attention", map[string]any{
-		"state":      state,
-		"site":       site,
-		"started_at": ts,
-		"last_seen":  ts,
-	})
-}
-
-// TouchAttentionInterval bumps last_seen on an open interval.
-func (m *Manager) TouchAttentionInterval(recordID string, at time.Time) error {
-	return m.updateRecord("attention", recordID, map[string]any{
-		"last_seen": at.UTC().Format(time.RFC3339),
-	})
-}
-
-// AttentionInterval is one contiguous span of attention as stored in PB.
+// AttentionInterval is one contiguous attention span.
 type AttentionInterval struct {
 	State     string `json:"state"`
 	Site      string `json:"site"`
@@ -60,58 +15,84 @@ type AttentionInterval struct {
 	LastSeen  string `json:"last_seen"`
 }
 
-// GetAttentionIntervals returns intervals overlapping [from, to), oldest first.
-// Pages through PB since a day of browsing can exceed one page of records.
-func (m *Manager) GetAttentionIntervals(from, to time.Time) ([]AttentionInterval, error) {
-	// Timestamps are stored as RFC3339 UTC strings, which sort lexicographically,
-	// so PB's plain string comparison is a correct time comparison.
-	filter := fmt.Sprintf("last_seen >= '%s' && started_at < '%s'",
-		from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339))
-
-	intervals := []AttentionInterval{}
-	for page := 1; ; page++ {
-		u, err := url.Parse(fmt.Sprintf("%s/api/collections/attention/records", m.BaseURL))
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse URL: %w", err)
-		}
-		q := u.Query()
-		q.Set("filter", filter)
-		q.Set("sort", "started_at")
-		q.Set("perPage", "500")
-		q.Set("page", strconv.Itoa(page))
-		u.RawQuery = q.Encode()
-
-		req, err := http.NewRequest("GET", u.String(), nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
-		}
-
-		resp, err := m.DoRequest(req)
-		if err != nil {
-			return nil, fmt.Errorf("failed to send request: %w", err)
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("failed to read response body: %w", err)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("attention fetch failed with status %d: %s", resp.StatusCode, string(body))
-		}
-
-		var result struct {
-			Items      []AttentionInterval `json:"items"`
-			TotalPages int                 `json:"totalPages"`
-		}
-		if err := json.Unmarshal(body, &result); err != nil {
-			return nil, fmt.Errorf("failed to parse response: %w", err)
-		}
-
-		intervals = append(intervals, result.Items...)
-		if page >= result.TotalPages {
-			return intervals, nil
-		}
+// CreateAttentionInterval opens a new attention interval and returns its ID.
+func (m *Manager) CreateAttentionInterval(state, site string, at time.Time) (string, error) {
+	switch state {
+	case "site", "idle", "away":
+	default:
+		return "", fmt.Errorf("invalid attention state %q", state)
 	}
+
+	ctx, cancel := operationContext()
+	defer cancel()
+
+	var id int64
+	err := m.pool.QueryRow(ctx, `
+		INSERT INTO attention_intervals (state, site, started_at, last_seen)
+		VALUES ($1, $2, $3, $3)
+		RETURNING id
+	`, state, site, at).Scan(&id)
+	if err != nil {
+		return "", err
+	}
+	return strconv.FormatInt(id, 10), nil
+}
+
+// TouchAttentionInterval advances last_seen on an open interval.
+func (m *Manager) TouchAttentionInterval(recordID string, at time.Time) error {
+	id, err := strconv.ParseInt(recordID, 10, 64)
+	if err != nil || id <= 0 {
+		return errors.New("invalid attention interval ID")
+	}
+
+	ctx, cancel := operationContext()
+	defer cancel()
+
+	result, err := m.pool.Exec(ctx, `
+		UPDATE attention_intervals
+		SET last_seen = $1
+		WHERE id = $2 AND last_seen <= $1
+	`, at, id)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return errors.New("attention interval was not found or moved backwards")
+	}
+	return nil
+}
+
+// GetAttentionIntervals returns intervals overlapping [from, to), oldest first.
+func (m *Manager) GetAttentionIntervals(from, to time.Time) ([]AttentionInterval, error) {
+	if !from.Before(to) {
+		return nil, errors.New("attention interval start must precede end")
+	}
+
+	ctx, cancel := operationContext()
+	defer cancel()
+
+	rows, err := m.pool.Query(ctx, `
+		SELECT state, site, started_at, last_seen
+		FROM attention_intervals
+		WHERE started_at < $2 AND last_seen >= $1
+		ORDER BY started_at
+		LIMIT 5000
+	`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	intervals := make([]AttentionInterval, 0)
+	for rows.Next() {
+		var interval AttentionInterval
+		var startedAt, lastSeen time.Time
+		if err := rows.Scan(&interval.State, &interval.Site, &startedAt, &lastSeen); err != nil {
+			return nil, err
+		}
+		interval.StartedAt = startedAt.UTC().Format(time.RFC3339)
+		interval.LastSeen = lastSeen.UTC().Format(time.RFC3339)
+		intervals = append(intervals, interval)
+	}
+	return intervals, rows.Err()
 }

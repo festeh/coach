@@ -106,3 +106,27 @@ func TestLockDecisionsRejectsGet(t *testing.T) {
 		t.Errorf("Expected 405 for GET, got %d", rr.Code)
 	}
 }
+
+func TestUnlockStatsRejectsNonGet(t *testing.T) {
+	server := &Server{State: &State{}}
+
+	req := httptest.NewRequest(http.MethodPost, "/lock-decisions/stats", nil)
+	rr := httptest.NewRecorder()
+	server.LockDecisionStatsHandler(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("Expected 405, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestUnlockStatsWithoutJournalDoesNotPanic(t *testing.T) {
+	server := &Server{State: &State{}}
+
+	req := httptest.NewRequest(http.MethodGet, "/lock-decisions/stats?days=notanumber", nil)
+	rr := httptest.NewRecorder()
+	server.LockDecisionStatsHandler(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("Expected 503 without a journal, got %d: %s", rr.Code, rr.Body.String())
+	}
+}

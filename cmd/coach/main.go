@@ -2,7 +2,9 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"time"
 
@@ -24,8 +26,11 @@ var port string
 
 func main() {
 	// Parse command line flags
-	flag.StringVar(&port, "port", ":8080", "HTTP server port (e.g. ':8080')")
+	flag.StringVar(&port, "port", "127.0.0.1:8080", "loopback HTTP listen address")
 	flag.Parse()
+	if err := requireLoopbackAddress(port); err != nil {
+		log.Fatal("Invalid listen address", "error", err)
+	}
 
 	log.SetTimeFormat(time.Stamp)
 	log.SetReportCaller(true)
@@ -40,6 +45,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize server: %v", err)
 	}
+	defer server.Close()
 
 	// Set up routes
 	mux := server.SetupRoutes()
@@ -50,7 +56,27 @@ func main() {
 		httpSwagger.URL("/swagger/doc.json"),
 	))
 
-	log.Info("Server starting on", "port", port)
-	log.Fatal(http.ListenAndServe(port, nil))
+	httpServer := &http.Server{
+		Addr:              port,
+		Handler:           nil,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	log.Info("Server starting", "address", port)
+	log.Fatal(httpServer.ListenAndServe())
 }
 
+func requireLoopbackAddress(address string) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("parse address: %w", err)
+	}
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("address must use an explicit loopback host")
+	}
+	return nil
+}

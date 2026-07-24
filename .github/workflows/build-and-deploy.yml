@@ -1,80 +1,72 @@
-name: Build and Deploy
+name: Build and deploy
 
 on:
   push:
-    branches: [ main ]  # Adjust this to your main branch name if different
+    branches:
+      - main
+  workflow_dispatch:
 
-env:
-  GO_VERSION: '1.25'
-  NODE_VERSION: '22'
-  APP_NAME: coach
-  DEPLOY_PATH: /opt/coach
+permissions:
+  contents: read
+
+concurrency:
+  group: coach-production
+  cancel-in-progress: false
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 15
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: coach-deploy
+
     steps:
-    - uses: actions/checkout@v4
+      - name: Check out the reviewed revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: admin/.node-version
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
 
-    - name: Build admin frontend
-      run: cd admin && npm ci && npm run build
+      - name: Install the pinned npm release
+        run: npm install --global npm@12.0.1
 
-    - name: Setup Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: true
 
-    - name: Build Go binary
-      run: go build -o ${{ env.APP_NAME }} cmd/coach/main.go
+      - name: Build and test the immutable release
+        run: ./scripts/build-release
 
-    - name: Create coach_main directory
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.HOST }}
-        username: root
-        key: ${{ secrets.SSH_KEY }}
-        script: |
-          mkdir -p ${{ env.DEPLOY_PATH }}
+      - name: Configure pinned production SSH access
+        env:
+          DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+        run: |
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > ~/.ssh/coach_deploy
+          chmod 0600 ~/.ssh/known_hosts ~/.ssh/coach_deploy
 
-    - name: Copy executable
-      uses: appleboy/scp-action@master
-      with:
-        host: ${{ secrets.HOST }}
-        username: root
-        key: ${{ secrets.SSH_KEY }}
-        source: "coach"
-        target: ${{ env.DEPLOY_PATH }}
-
-    - name: Create .env file
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.HOST }}
-        username: root
-        key: ${{ secrets.SSH_KEY }}
-        script: |
-          cat > ${{ env.DEPLOY_PATH }}/.env << EOF
-          PB_URL=${{ secrets.PB_URL }}
-          PB_EMAIL=${{ secrets.PB_EMAIL }}
-          PB_PASSWORD=${{ secrets.PB_PASSWORD }}
-          EOF
-          chmod 600 ${{ env.DEPLOY_PATH }}/.env
-
-    - name: Execute remote commands
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.HOST }}
-        username: root
-        key: ${{ secrets.SSH_KEY }}
-        script: |
-          if systemctl is-enabled coach.service; then
-            systemctl reload coach.service || systemctl restart coach.service
-            echo "Coach service reloaded/restarted successfully"
-          else
-            echo "Coach service is not enabled"
-          fi
+      - name: Upload and atomically activate the release
+        run: |
+          release_id="$(cat build/coach.sha256)"
+          ssh_args=(
+            -i ~/.ssh/coach_deploy
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            "$DEPLOY_USER@$DEPLOY_HOST"
+          )
+          ssh "${ssh_args[@]}" "upload $release_id" < build/coach.tar.gz
+          ssh "${ssh_args[@]}" "activate $release_id"
+          active_release="$(ssh "${ssh_args[@]}" status)"
+          test "$active_release" = "$release_id"

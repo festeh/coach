@@ -1,19 +1,19 @@
-# Build admin frontend
-build-admin:
-    cd admin && npm install && npm run build
+set shell := ["bash", "-euo", "pipefail", "-c"]
 
-# Build Go binary
-build-go: build-admin
-    go build -o coach cmd/coach/main.go
+# Run the local server using DATABASE_URL from the caller's environment.
+dev:
+    cd admin && npm run build
+    go run ./cmd/coach
 
-# Build everything
-build: build-go
+# Run backend tests and frontend type/security checks.
+test:
+    go test ./...
+    cd admin && npm ci && npm run check && npm audit --audit-level=low
 
-# Run the server locally
-run: build
-    ./coach
+# Build and package the immutable Linux production release.
+build:
+    ./scripts/build-release
 
-# Dev: build and open admin page
-dev: build
-    xdg-open http://localhost:8080/admin/ &
-    ./coach
+# Remove generated dependencies and release artifacts.
+clean:
+    rm -rf admin/node_modules admin/dist build

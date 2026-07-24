@@ -1,6 +1,7 @@
 package coach
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -32,6 +33,21 @@ func writeJSON(w http.ResponseWriter, data any) error {
 // @Success 200 {string} string "Healthy"
 // @Router /health [get]
 func (s *Server) HealthHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.DBManager == nil {
+		http.Error(w, "Database unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := s.DBManager.Ping(ctx); err != nil {
+		log.Error("Health check failed", "err", err)
+		http.Error(w, "Database unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Healthy"))
 }
@@ -286,6 +302,49 @@ func (s *Server) LockDecisionsHandler(w http.ResponseWriter, r *http.Request) {
 
 	s.logLockDecision("denial", body.UserMessage, body.AgentMessage, 0)
 	writeJSON(w, map[string]bool{"ok": true})
+}
+
+// @Summary Get unlock stats
+// @Description Returns unlocks and unlocked seconds per day for the last N days
+// @Tags agent-lock
+// @Produce json
+// @Param days query int false "Days to report, oldest first (default 7)"
+// @Success 200 {array} db.UnlockDay
+// @Router /lock-decisions/stats [get]
+func (s *Server) LockDecisionStatsHandler(w http.ResponseWriter, r *http.Request) {
+	log.Info("Called /lock-decisions/stats", "method", r.Method)
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	days := 7
+	if daysStr := r.URL.Query().Get("days"); daysStr != "" {
+		parsed, err := strconv.Atoi(daysStr)
+		if err != nil || parsed < 1 {
+			parsed = 7
+		}
+		// A phone header reads a week; a month is plenty of rope for anything else.
+		if parsed > 31 {
+			parsed = 31
+		}
+		days = parsed
+	}
+
+	if s.DBManager == nil {
+		http.Error(w, "Journal unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	stats, err := s.DBManager.GetUnlockStats(days)
+	if err != nil {
+		log.Error("Failed to get unlock stats", "err", err)
+		http.Error(w, "Failed to get unlock stats", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, stats)
 }
 
 // @Summary Get focus history
