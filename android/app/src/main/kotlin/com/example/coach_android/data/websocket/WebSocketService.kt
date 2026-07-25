@@ -167,13 +167,12 @@ class WebSocketService(
         }
     }
 
+    // Retried for as long as the service lives. Giving up after a fixed number of
+    // attempts left the app silently offline — a server restart during a deploy
+    // cost the socket until someone hit Refresh — and the phone can't tell a
+    // finished outage from an ongoing one without trying.
     private fun scheduleReconnect() {
         if (reconnectJob?.isActive == true) return
-
-        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            Log.e(tag, "Max reconnection attempts reached ($reconnectAttempts). Giving up.")
-            return
-        }
 
         reconnectAttempts++
 
@@ -326,7 +325,6 @@ class WebSocketService(
     }
 
     companion object {
-        private const val MAX_RECONNECT_ATTEMPTS = 10
         private const val BASE_RECONNECT_DELAY_MS = 2000L
         private const val FOCUS_QUERY_INTERVAL_MS = 60_000L
 

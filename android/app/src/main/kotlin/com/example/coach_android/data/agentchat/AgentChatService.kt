@@ -245,13 +245,13 @@ class AgentChatService(
         }
     }
 
+    // Retried as long as a screen wants the socket — shouldReconnect is cleared on
+    // disconnect(), so this stops when the chat closes rather than after a fixed
+    // number of tries. A capped attempt count used to leave the chat dead after a
+    // server restart, with only the error banner's Retry to bring it back.
     private fun scheduleReconnect() {
         if (!shouldReconnect) return
         if (reconnectJob?.isActive == true) return
-        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            Log.e(tag, "Agent chat: giving up after $reconnectAttempts attempts")
-            return
-        }
         reconnectAttempts++
         val delayMs =
             (BASE_RECONNECT_DELAY_MS * 2.0.pow(min(reconnectAttempts - 1, 6).toDouble())).toLong() +
@@ -270,7 +270,6 @@ class AgentChatService(
     }
 
     companion object {
-        private const val MAX_RECONNECT_ATTEMPTS = 5
         private const val BASE_RECONNECT_DELAY_MS = 1500L
     }
 }
