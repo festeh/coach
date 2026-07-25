@@ -30,6 +30,7 @@ type State struct {
 	dbManager         *db.Manager
 	agentReleaseUntil *time.Time
 	agentLockTimer    *time.Timer
+	overrides         overrideLedger
 }
 
 type FocusInfo struct {
@@ -39,6 +40,15 @@ type FocusInfo struct {
 	FocusTimeLeft        time.Duration `json:"focus_time_left"`
 	NumFocuses           int           `json:"num_focuses"`
 	AgentReleaseTimeLeft *int64        `json:"agent_release_time_left"`
+
+	// Cooldown state rides the focus frame rather than a second endpoint: the
+	// phone already collects this frame, and the fields are flattened because the
+	// client folds the frame into a flat map and would stringify a nested object.
+	OverridesToday      int `json:"overrides_today"`
+	CooldownSeconds     int `json:"override_cooldown_seconds"`
+	CooldownRemaining   int `json:"override_cooldown_remaining"`
+	NextCooldownSeconds int `json:"override_next_cooldown_seconds"`
+	ShortUnblocksLeft   int `json:"short_unblocks_left"`
 }
 
 // AgentLockInfo is the public shape of agent-lock state. TimeLeftSeconds is nil when locked.
@@ -55,6 +65,7 @@ func (s *State) GetCurrentFocusInfo() FocusInfo {
 	if s.stats != nil {
 		numFocuses = s.stats.GetTodayFocusCount()
 	}
+	cooldown := computeCooldown(time.Now(), s.overrides.onDay(time.Now()))
 	return FocusInfo{
 		Type:                 "focusing",
 		Focusing:             s.getTimeLeftLocked() > 0,
@@ -62,6 +73,11 @@ func (s *State) GetCurrentFocusInfo() FocusInfo {
 		FocusTimeLeft:        focusTimeLeft / time.Second,
 		NumFocuses:           numFocuses,
 		AgentReleaseTimeLeft: s.agentReleaseTimeLeftLocked(),
+		OverridesToday:       cooldown.OverridesToday,
+		CooldownSeconds:      cooldown.CooldownSeconds,
+		CooldownRemaining:    cooldown.RemainingSeconds,
+		NextCooldownSeconds:  cooldown.NextCooldownSeconds,
+		ShortUnblocksLeft:    cooldown.ShortUnblocksLeft,
 	}
 }
 
@@ -94,6 +110,109 @@ func (s *State) ReleaseAgentLock(d time.Duration) {
 		log.Info("Agent lock released", "until", candidate)
 		go s.NotifyAllClients(s.GetCurrentFocusInfo())
 	}
+}
+
+// OverrideCooldown prices the next override without changing anything.
+func (s *State) OverrideCooldown() OverrideCooldown {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return computeCooldown(now, s.overrides.onDay(now))
+}
+
+// TakeOverride releases the lock for OverrideSeconds and bills the day's ledger.
+// It refuses while a cooldown runs, returning the live cooldown either way so the
+// caller can tell the client what it is waiting for. The bool reports whether the
+// lock actually came off.
+func (s *State) TakeOverride() (OverrideCooldown, bool) {
+	now := time.Now()
+
+	s.mu.Lock()
+	ledger := s.overrides.onDay(now)
+	if cooldown := computeCooldown(now, ledger); cooldown.Active() {
+		s.overrides = ledger
+		s.mu.Unlock()
+		log.Info("Override refused, cooldown running", "remaining", cooldown.RemainingSeconds)
+		return cooldown, false
+	}
+
+	ledger.overrides++
+	ledger.lastOverrideEnd = now.Add(OverrideSeconds * time.Second)
+	// A new override opens a new cooldown window, so the hatch allowance is fresh.
+	ledger.shortUnblocksUsed = 0
+	s.overrides = ledger
+	s.mu.Unlock()
+
+	// Called without the lock: ReleaseAgentLock takes it and broadcasts.
+	s.ReleaseAgentLock(OverrideSeconds * time.Second)
+	log.Info("Override taken", "today", ledger.overrides, "next_cooldown", ledger.overrides*CooldownStepSeconds)
+	return s.OverrideCooldown(), true
+}
+
+// TakeShortUnblock releases the lock for ShortUnblockSeconds. It is only offered
+// while a cooldown runs and only ShortUnblockLimit times per window; it is free,
+// so it never lengthens the cooldown it is softening.
+func (s *State) TakeShortUnblock() (OverrideCooldown, bool) {
+	now := time.Now()
+
+	s.mu.Lock()
+	ledger := s.overrides.onDay(now)
+	cooldown := computeCooldown(now, ledger)
+	if !cooldown.Active() || cooldown.ShortUnblocksLeft == 0 {
+		s.overrides = ledger
+		s.mu.Unlock()
+		return cooldown, false
+	}
+	ledger.shortUnblocksUsed++
+	s.overrides = ledger
+	s.mu.Unlock()
+
+	s.ReleaseAgentLock(ShortUnblockSeconds * time.Second)
+	log.Info("Short unblock taken", "used", ledger.shortUnblocksUsed, "limit", ShortUnblockLimit)
+	return s.OverrideCooldown(), true
+}
+
+// RecordOverride bills the ledger for an override released through the other
+// road — the HTTP path the agent and future callers use. It neither refuses nor
+// releases, because that already happened; it exists so both roads to a
+// kind='override' row tell the same story about the day, instead of diverging
+// until the next restart re-reads the journal.
+func (s *State) RecordOverride(d time.Duration) {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ledger := s.overrides.onDay(now)
+	ledger.overrides++
+	if end := now.Add(d); end.After(ledger.lastOverrideEnd) {
+		ledger.lastOverrideEnd = end
+	}
+	ledger.shortUnblocksUsed = 0
+	s.overrides = ledger
+	log.Info("Override recorded from HTTP path", "today", ledger.overrides)
+}
+
+// RestoreOverrideLedger seeds today's counters from the journal on startup, so a
+// restart doesn't reset the escalation or hand back a free override. A
+// lastOverrideEnd of nil means no override was taken today.
+func (s *State) RestoreOverrideLedger(overridesToday int, lastOverrideEnd *time.Time, shortUnblocksUsed int) {
+	if overridesToday <= 0 {
+		return
+	}
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.overrides = overrideLedger{
+		day:               db.LocalDayStart(now),
+		overrides:         overridesToday,
+		shortUnblocksUsed: shortUnblocksUsed,
+	}
+	if lastOverrideEnd != nil {
+		s.overrides.lastOverrideEnd = *lastOverrideEnd
+	}
+	log.Info("Restored override ledger",
+		"overrides", overridesToday,
+		"short_unblocks_used", shortUnblocksUsed,
+		"cooldown_remaining", computeCooldown(now, s.overrides).RemainingSeconds)
 }
 
 // EngageAgentLock cancels any active release window.

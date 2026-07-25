@@ -149,6 +149,10 @@ func (s *Server) AgentLockHandler(w http.ResponseWriter, r *http.Request) {
 		kind := "grant"
 		if r.FormValue("is_override") == "true" {
 			kind = "override"
+			// Counts toward the day's escalation like a WebSocket override would.
+			// This road does not enforce the cooldown: it belongs to the agent,
+			// whose authority over the lock is not the user's budget.
+			s.State.RecordOverride(time.Duration(duration) * time.Second)
 		}
 		s.logLockDecision(kind, r.FormValue("user_message"), r.FormValue("agent_message"), duration)
 
@@ -187,6 +191,34 @@ func (s *Server) logLockDecision(kind, userMessage, agentMessage string, duratio
 	}()
 }
 
+// refuseUnblock tells one client its unblock was declined and what it is waiting
+// for. The lock state has not changed, so there is nothing to broadcast.
+func (s *Server) refuseUnblock(conn *websocket.Conn, request string, cooldown OverrideCooldown) {
+	log.Info("Unblock refused",
+		"request", request,
+		"cooldown_remaining", cooldown.RemainingSeconds,
+		"short_unblocks_left", cooldown.ShortUnblocksLeft)
+
+	refusal := struct {
+		Type              string `json:"type"`
+		Request           string `json:"request"`
+		OverridesToday    int    `json:"overrides_today"`
+		CooldownSeconds   int    `json:"override_cooldown_seconds"`
+		CooldownRemaining int    `json:"override_cooldown_remaining"`
+		ShortUnblocksLeft int    `json:"short_unblocks_left"`
+	}{
+		Type:              "unblock_refused",
+		Request:           request,
+		OverridesToday:    cooldown.OverridesToday,
+		CooldownSeconds:   cooldown.CooldownSeconds,
+		CooldownRemaining: cooldown.RemainingSeconds,
+		ShortUnblocksLeft: cooldown.ShortUnblocksLeft,
+	}
+	if err := s.State.NotifySingleClient(conn, refusal); err != nil {
+		log.Error("Failed to send unblock refusal", "err", err)
+	}
+}
+
 // logTemptation records one blocked attempt, best-effort and asynchronous. A
 // failure (or a missing DB in tests) loses the row, never anything else.
 func (s *Server) logTemptation(source, target string) {
@@ -211,11 +243,12 @@ func (s *Server) writeLockState(w http.ResponseWriter) {
 		DurationSeconds int    `json:"duration_seconds"`
 	}
 	out := struct {
-		ReleasedSecondsToday int           `json:"released_seconds_today"`
-		OverrideCountToday   int           `json:"override_count_today"`
-		TemptationCountToday int           `json:"temptation_count_today"`
-		Recent               []recentEntry `json:"recent"`
-	}{Recent: []recentEntry{}}
+		ReleasedSecondsToday int              `json:"released_seconds_today"`
+		OverrideCountToday   int              `json:"override_count_today"`
+		TemptationCountToday int              `json:"temptation_count_today"`
+		Cooldown             OverrideCooldown `json:"cooldown"`
+		Recent               []recentEntry    `json:"recent"`
+	}{Cooldown: s.State.OverrideCooldown(), Recent: []recentEntry{}}
 
 	if s.DBManager == nil {
 		writeJSON(w, out)
@@ -553,14 +586,25 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 				s.logTemptation(message.Source, message.Target)
 			}
 		case "override":
-			// The escape hatch: a fixed 15 minutes, priced at a written reason.
-			// The release broadcast tells every client; the journal tells the judge.
+			// A fixed 15 minutes, priced at a written reason and, after the first
+			// of the day, at a wait that grows by 30s each time. The release
+			// broadcast tells every client; the journal tells the judge.
 			if message.Message == "" {
 				log.Warn("Override without a reason ignored")
+			} else if cooldown, taken := s.State.TakeOverride(); !taken {
+				s.refuseUnblock(conn, "override", cooldown)
 			} else {
-				const overrideSeconds = 15 * 60
-				s.State.ReleaseAgentLock(overrideSeconds * time.Second)
-				s.logLockDecision("override", message.Message, "", overrideSeconds)
+				s.logLockDecision("override", message.Message, "", OverrideSeconds)
+			}
+
+		case "short_unblock":
+			// The way out of a cooldown: 30 seconds, no reason asked, capped per
+			// window. Free by design, so it is not journalled as an override and
+			// does not lengthen the cooldown it interrupts.
+			if cooldown, taken := s.State.TakeShortUnblock(); !taken {
+				s.refuseUnblock(conn, "short_unblock", cooldown)
+			} else {
+				s.logLockDecision("short_unblock", "", "", ShortUnblockSeconds)
 			}
 		case "ping":
 			// "type" is what current clients match on; "response" is kept for

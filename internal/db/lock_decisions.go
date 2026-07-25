@@ -38,6 +38,42 @@ func (m *Manager) InsertLockDecision(kind, source, userMessage, agentMessage str
 	return err
 }
 
+// TodayOverrides returns how many overrides were taken today and when the last
+// one's release lapses (created_at + its duration). Both are what the cooldown
+// is priced from, so a restart doesn't hand back a free override.
+func (m *Manager) TodayOverrides() (int, *time.Time, error) {
+	start, end := localDayBounds(time.Now())
+	ctx, cancel := operationContext()
+	defer cancel()
+
+	var count int
+	var lastEnd *time.Time
+	err := m.pool.QueryRow(ctx, `
+		SELECT count(*), max(created_at + make_interval(secs => duration_seconds))
+		FROM lock_decisions
+		WHERE kind = 'override'
+		AND created_at >= $1 AND created_at < $2
+	`, start, end).Scan(&count, &lastEnd)
+	if err != nil {
+		return 0, nil, err
+	}
+	return count, lastEnd, nil
+}
+
+// CountShortUnblocksSince counts escape-hatch uses since t, which is how the
+// per-cooldown-window cap survives a restart.
+func (m *Manager) CountShortUnblocksSince(since time.Time) (int, error) {
+	ctx, cancel := operationContext()
+	defer cancel()
+
+	var count int
+	err := m.pool.QueryRow(ctx, `
+		SELECT count(*) FROM lock_decisions
+		WHERE kind = 'short_unblock' AND created_at >= $1
+	`, since).Scan(&count)
+	return count, err
+}
+
 // GetTodayLockDecisions returns today's decisions oldest first, using the
 // server's configured local timezone.
 func (m *Manager) GetTodayLockDecisions() ([]LockDecision, error) {
@@ -77,8 +113,9 @@ func (m *Manager) GetTodayLockDecisions() ([]LockDecision, error) {
 }
 
 // GetUnlockStats returns one row per local day for the last `days` days, oldest
-// first, quiet days included as zeroes. Grants and overrides both count: either
-// way the lock was off, which is what the phone's header reports.
+// first, quiet days included as zeroes. Grants, overrides, and escape-hatch
+// unblocks all count: either way the lock was off, which is what the phone's
+// header reports.
 func (m *Manager) GetUnlockStats(days int) ([]UnlockDay, error) {
 	if days < 1 {
 		days = 1
@@ -95,7 +132,7 @@ func (m *Manager) GetUnlockStats(days int) ([]UnlockDay, error) {
 		SELECT created_at, duration_seconds
 		FROM lock_decisions
 		WHERE created_at >= $1 AND created_at < $2
-		AND kind IN ('grant', 'override')
+		AND kind IN ('grant', 'override', 'short_unblock')
 		ORDER BY created_at
 	`, start, end)
 	if err != nil {

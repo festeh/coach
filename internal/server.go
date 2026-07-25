@@ -69,6 +69,24 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 	} else {
 		server.State.RestoreAgentLock(releaseUntil)
 	}
+
+	// Restore today's override ledger, so a restart is not a way to buy back a
+	// free override or a fresh set of escape hatches.
+	if overrides, lastEnd, err := dbManager.TodayOverrides(); err != nil {
+		log.Warn("Failed to load override ledger", "error", err)
+	} else if overrides > 0 {
+		hatchesUsed := 0
+		if lastEnd != nil {
+			// The cooldown window opened when the last release lapsed, so that is
+			// the boundary the per-window hatch cap counts from.
+			if used, err := dbManager.CountShortUnblocksSince(*lastEnd); err != nil {
+				log.Warn("Failed to count short unblocks", "error", err)
+			} else {
+				hatchesUsed = used
+			}
+		}
+		server.State.RestoreOverrideLedger(overrides, lastEnd, hatchesUsed)
+	}
 	server.DBManager = dbManager
 
 	return server, nil
