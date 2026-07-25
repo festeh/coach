@@ -10,6 +10,13 @@ data class FocusData(
     val numFocuses: Int = 0,
     val lastFocusEndTime: Int = 0,
     val agentReleaseTimeLeft: Int? = null,
+    // The override cooldown, as the server prices it. The first override of each
+    // local day is free; each one after it makes the next wait 30s longer.
+    val overridesToday: Int = 0,
+    val cooldownSeconds: Int = 0,
+    val cooldownRemaining: Int = 0,
+    val nextCooldownSeconds: Int = 0,
+    val shortUnblocksLeft: Int = 0,
 ) {
     val isAgentLocked: Boolean get() = agentReleaseTimeLeft == null
     val isFocused: Boolean get() = isFocusing || isAgentLocked
@@ -20,7 +27,11 @@ data class FocusData(
             kotlin.math.abs(sinceLastChange - other.sinceLastChange) > 10 ||
             kotlin.math.abs(focusTimeLeft - other.focusTimeLeft) > 30 ||
             kotlin.math.abs((agentReleaseTimeLeft ?: 0) - (other.agentReleaseTimeLeft ?: 0)) > 30 ||
-            numFocuses != other.numFocuses
+            numFocuses != other.numFocuses ||
+            // Only the discrete counters, not the remaining seconds: those tick
+            // once a second and the UI counts them down locally between frames.
+            overridesToday != other.overridesToday ||
+            shortUnblocksLeft != other.shortUnblocksLeft
 
     fun updateFromWebSocket(data: Map<String, Any?>): FocusData {
         val nowFocusing = data["focusing"] as? Boolean ?: isFocusing
@@ -34,8 +45,21 @@ data class FocusData(
             numFocuses = (data["num_focuses"] as? Number)?.toInt() ?: numFocuses,
             lastFocusEndTime = newLastFocusEndTime,
             agentReleaseTimeLeft = parseAgentReleaseTimeLeft(data),
-        )
+        ).withCooldownFrom(data)
     }
+
+    // A refusal frame carries the cooldown numbers but none of the focus ones, so
+    // it must not travel through updateFromWebSocket: absent
+    // agent_release_time_left reads as null there, which would report the lock
+    // engaged when it may not be.
+    fun withCooldownFrom(data: Map<String, Any?>): FocusData =
+        copy(
+            overridesToday = (data["overrides_today"] as? Number)?.toInt() ?: overridesToday,
+            cooldownSeconds = (data["override_cooldown_seconds"] as? Number)?.toInt() ?: cooldownSeconds,
+            cooldownRemaining = (data["override_cooldown_remaining"] as? Number)?.toInt() ?: cooldownRemaining,
+            nextCooldownSeconds = (data["override_next_cooldown_seconds"] as? Number)?.toInt() ?: nextCooldownSeconds,
+            shortUnblocksLeft = (data["short_unblocks_left"] as? Number)?.toInt() ?: shortUnblocksLeft,
+        )
 
     companion object {
         // Server sends `agent_release_time_left` as a JSON number (seconds remaining)

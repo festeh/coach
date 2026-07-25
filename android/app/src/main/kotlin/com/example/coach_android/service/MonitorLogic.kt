@@ -40,6 +40,7 @@ class MonitorLogic(
     var applicationContext: Context? = null
 
     private var webSocketJob: Job? = null
+    private var refusalJob: Job? = null
 
     fun initialize() {
         Log.i(tag, "Initializing MonitorLogic...")
@@ -87,6 +88,17 @@ class MonitorLogic(
             scope.launch {
                 webSocketService.focusUpdates.collect { data ->
                     handleWebSocketUpdate(data)
+                }
+            }
+        refusalJob?.cancel()
+        refusalJob =
+            scope.launch {
+                // A refusal carries fresher cooldown numbers than the phone holds,
+                // so fold them in even though no lock state changed.
+                // Not persisted: the cooldown is the server's to own, and every
+                // connect brings it back on the first focus frame.
+                webSocketService.unblockRefusals.collect { data ->
+                    _focusData.value = _focusData.value.withCooldownFrom(data)
                 }
             }
     }
@@ -353,6 +365,13 @@ class MonitorLogic(
         webSocketService.sendOverride(reason)
     }
 
+    fun takeShortUnblock() {
+        webSocketService.sendShortUnblock()
+    }
+
+    // Refusals reach the UI so a declined tap says why instead of doing nothing.
+    val unblockRefusals get() = webSocketService.unblockRefusals
+
     fun reloadMonitoredPackages() {
         monitoredPackages = prefs.loadMonitoredPackages()
         Log.i(tag, "Reloaded monitored packages: ${monitoredPackages.size} apps")
@@ -368,6 +387,7 @@ class MonitorLogic(
     fun dispose() {
         Log.i(tag, "Disposing MonitorLogic")
         webSocketJob?.cancel()
+        refusalJob?.cancel()
         scope.cancel()
         webSocketService.dispose()
     }

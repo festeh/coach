@@ -41,6 +41,12 @@ class WebSocketService(
     private val _focusUpdates = MutableSharedFlow<Map<String, Any?>>(extraBufferCapacity = 16)
     val focusUpdates: SharedFlow<Map<String, Any?>> = _focusUpdates.asSharedFlow()
 
+    // The server declining an override or a short unblock. The phone can usually
+    // predict this from the cooldown it already holds, but its copy is up to a
+    // poll interval stale, so the refusal is what settles a close call.
+    private val _unblockRefusals = MutableSharedFlow<Map<String, Any?>>(extraBufferCapacity = 8)
+    val unblockRefusals: SharedFlow<Map<String, Any?>> = _unblockRefusals.asSharedFlow()
+
     fun getConnectionStatus(): Map<String, Any?> =
         mapOf(
             "isConnected" to isConnected,
@@ -129,9 +135,17 @@ class WebSocketService(
             val dataMap = jsonObjectToMap(data)
             val messageType = (data["type"]?.jsonPrimitive?.content)
 
-            // Handle response to pending request
+            if (messageType == "unblock_refused") {
+                Log.i(tag, "Unblock refused by server: $text")
+                scope.launch { _unblockRefusals.emit(dataMap) }
+                return
+            }
+
+            // Handle response to pending request. Gated on the frame type a
+            // get_focusing reply actually has, so an unsolicited frame arriving
+            // mid-request is no longer swallowed as its answer.
             val pending = pendingRequest
-            if (pending != null) {
+            if (pending != null && messageType == "focusing") {
                 pendingRequest = null
                 pending.complete(dataMap)
                 return
@@ -248,6 +262,12 @@ class WebSocketService(
                 "message" to trimmedReason,
             ),
         )
+    }
+
+    // The way out of a cooldown: 30 seconds, no reason asked. The server decides
+    // whether the allowance is there and answers with a refusal if it is not.
+    fun sendShortUnblock() {
+        sendMessage(mapOf("type" to "short_unblock"))
     }
 
     suspend fun sendFocusCommand(durationMinutes: Int = 0) {
