@@ -41,15 +41,11 @@ class WebSocketService(
     private val _focusUpdates = MutableSharedFlow<Map<String, Any?>>(extraBufferCapacity = 16)
     val focusUpdates: SharedFlow<Map<String, Any?>> = _focusUpdates.asSharedFlow()
 
-    val connected: Boolean get() = isConnected
-
     fun getConnectionStatus(): Map<String, Any?> =
         mapOf(
             "isConnected" to isConnected,
             "isConnecting" to isConnecting,
             "reconnectAttempts" to reconnectAttempts,
-            "hasPendingRequest" to (pendingRequest != null),
-            "hasWebSocket" to (webSocket != null),
             "websocketUrl" to url,
         )
 
@@ -141,11 +137,9 @@ class WebSocketService(
                 return
             }
 
-            // Emit focus updates
-            if (messageType == "focusing" ||
-                messageType == "focusing_status" ||
-                (messageType == null && data.containsKey("focusing"))
-            ) {
+            // Emit focus updates. The server stamps every focus frame with this
+            // type, both for broadcasts and for get_focusing replies.
+            if (messageType == "focusing") {
                 scope.launch { _focusUpdates.emit(dataMap) }
                 Log.d(tag, "Focus update emitted: focusing=${data["focusing"]}")
             }

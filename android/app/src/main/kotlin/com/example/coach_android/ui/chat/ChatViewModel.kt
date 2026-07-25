@@ -37,9 +37,7 @@ data class ChatUiState(
     // card's week so the sheet has something to show while the month arrives.
     val unlockDetail: List<UnlockDay> = emptyList(),
     val unlockDetailLoading: Boolean = false,
-) {
-    val today: UnlockDay? get() = unlockTrend.lastOrNull()
-}
+)
 
 class ChatViewModel(
     application: Application,

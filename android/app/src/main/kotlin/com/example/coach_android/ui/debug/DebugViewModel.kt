@@ -1,15 +1,14 @@
 package com.example.coach_android.ui.debug
 
-import android.app.AppOpsManager
 import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
-import android.os.Process
 import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import com.example.coach_android.FocusMonitorService
+import com.example.coach_android.util.Permissions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,23 +33,12 @@ class DebugViewModel(
 
         _state.value =
             DebugUiState(
-                hasUsageStats = checkUsageStatsPermission(app),
+                hasUsageStats = Permissions.hasUsageStats(app),
                 hasOverlay = Settings.canDrawOverlays(app),
                 hasBatteryExclusion = checkBatteryExclusion(app),
                 isServiceRunning = service != null,
                 wsStatus = service?.getMonitorLogic()?.getWebSocketConnectionStatus() ?: emptyMap(),
             )
-    }
-
-    private fun checkUsageStatsPermission(context: Context): Boolean {
-        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager ?: return false
-        val mode =
-            appOps.unsafeCheckOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS,
-                Process.myUid(),
-                context.packageName,
-            )
-        return mode == AppOpsManager.MODE_ALLOWED
     }
 
     private fun checkBatteryExclusion(context: Context): Boolean {

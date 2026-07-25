@@ -40,8 +40,6 @@ class UnlockStatsService(
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    val isConfigured: Boolean get() = baseUrl.isNotEmpty()
-
     suspend fun fetch(days: Int): List<UnlockDayDto>? {
         if (baseUrl.isEmpty()) {
             Log.w(tag, "No coach URL configured; skipping unlock stats fetch")

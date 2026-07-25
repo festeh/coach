@@ -63,6 +63,24 @@ fun DebugScreen(
             StatusRow("WebSocket connected", state.wsStatus["isConnected"] as? Boolean ?: false)
         }
         item {
+            DetailRow(
+                label = "Connecting",
+                value = if (state.wsStatus["isConnecting"] as? Boolean == true) "Yes" else "No",
+            )
+        }
+        item {
+            // The socket retries for as long as the service lives, so a climbing
+            // attempt count is the only thing that separates a wedged backoff
+            // loop from a connection that is simply idle.
+            val attempts = state.wsStatus["reconnectAttempts"] as? Int ?: 0
+            val connected = state.wsStatus["isConnected"] as? Boolean ?: false
+            DetailRow(
+                label = "Reconnect attempts",
+                value = "$attempts",
+                warn = attempts > 0 && !connected,
+            )
+        }
+        item {
             val wsUrl = state.wsStatus["websocketUrl"] as? String ?: ""
             if (wsUrl.isNotEmpty()) {
                 Text(
@@ -137,6 +155,32 @@ private fun PermissionRow(
                 TextButton(onClick = onRequest) { Text("Grant") }
             }
         }
+    }
+}
+
+// For diagnostics where neither value is pass or fail — a count, or a state the
+// socket is legitimately allowed to be in.
+@Composable
+private fun DetailRow(
+    label: String,
+    value: String,
+    warn: Boolean = false,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            color =
+                if (warn) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+        )
     }
 }
 

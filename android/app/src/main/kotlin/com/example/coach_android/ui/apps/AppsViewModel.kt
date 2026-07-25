@@ -65,7 +65,7 @@ class AppsViewModel(
         }
     }
 
-    fun refreshFromService() {
+    private fun refreshFromService() {
         val logic = FocusMonitorService.getInstance()?.getMonitorLogic() ?: return
 
         viewModelScope.launch {
@@ -108,12 +108,7 @@ class AppsViewModel(
     fun resetRule(rule: AppRule) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val service = FocusMonitorService.getInstance()
-                val container = service?.getMonitorLogic()
-                // Access RuleCounterDao through the service's container
-                // For now, reload rules which effectively resets the in-memory state
                 val today = TimeFormatter.todayString()
-                // We need the DAO - get it from the database
                 val dao = getRuleCounterDao()
                 dao?.resetCounters(rule.id, today)
                 loadRuleCounters()

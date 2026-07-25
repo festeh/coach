@@ -1,13 +1,12 @@
 package com.example.coach_android
 
-import android.app.AppOpsManager
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.os.Process
 import android.util.Log
+import com.example.coach_android.util.Permissions
 
 class AppMonitorHandler(
     private val context: Context,
@@ -28,20 +27,20 @@ class AppMonitorHandler(
     private val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager?
 
     fun reconcilePermission() {
-        if (hasUsageStatsPermission()) {
+        if (Permissions.hasUsageStats(context)) {
             startMonitoring()
         } else {
             stopMonitoring()
         }
     }
 
-    fun startMonitoring() {
+    private fun startMonitoring() {
         if (isMonitoring) {
             Log.d(TAG, "Already monitoring")
             return
         }
 
-        if (!hasUsageStatsPermission()) {
+        if (!Permissions.hasUsageStats(context)) {
             Log.w(TAG, "Usage stats permission not granted, cannot start monitoring")
             return
         }
@@ -129,20 +128,5 @@ class AppMonitorHandler(
         lastForegroundApp?.let {
             FocusMonitorService.getInstance()?.getMonitorLogic()?.ensureOverlay(it)
         }
-    }
-
-    private fun hasUsageStatsPermission(): Boolean {
-        val appOpsManager =
-            context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager?
-                ?: return false
-
-        val mode =
-            appOpsManager.unsafeCheckOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS,
-                Process.myUid(),
-                context.packageName,
-            )
-
-        return mode == AppOpsManager.MODE_ALLOWED
     }
 }

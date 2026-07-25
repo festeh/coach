@@ -22,7 +22,6 @@ class FocusMonitorService : Service() {
     private var monitorLogic: MonitorLogic? = null
     private var agentChatService: AgentChatService? = null
     private var unlockStats: UnlockStatsRepository? = null
-    private var overlayManager: OverlayManager? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val isRunning = AtomicBoolean(false)
@@ -174,7 +173,6 @@ class FocusMonitorService : Service() {
             // Wire overlay manager directly (no Activity dependency)
             val overlay = OverlayManager(applicationContext)
             overlay.onChallengeCompleted = { ruleId -> logic.onChallengeCompleted(ruleId) }
-            overlayManager = overlay
             logic.overlayManager = overlay
 
             logic.initialize()
