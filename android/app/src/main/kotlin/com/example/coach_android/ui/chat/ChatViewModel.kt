@@ -7,6 +7,7 @@ import com.example.coach_android.FocusMonitorService
 import com.example.coach_android.data.agentchat.AgentChatService
 import com.example.coach_android.data.agentchat.ChatEvent
 import com.example.coach_android.data.agentchat.ChatMessage
+import com.example.coach_android.data.coach.UnlockDayDto
 import com.example.coach_android.data.coach.UnlockStatsRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +33,10 @@ data class ChatUiState(
     // until a cached or fetched answer lands, which keeps the header from
     // flashing zeros it would have to take back.
     val unlockTrend: List<UnlockDay> = emptyList(),
+    // The detail sheet's longer window, loaded when it opens. Falls back to the
+    // card's week so the sheet has something to show while the month arrives.
+    val unlockDetail: List<UnlockDay> = emptyList(),
+    val unlockDetailLoading: Boolean = false,
 ) {
     val today: UnlockDay? get() = unlockTrend.lastOrNull()
 }
@@ -104,23 +109,24 @@ class ChatViewModel(
         statsJob =
             viewModelScope.launch {
                 repository.stats.collect { days ->
-                    _state.value =
-                        _state.value.copy(
-                            unlockTrend =
-                                days.mapNotNull { day ->
-                                    val date = runCatching { LocalDate.parse(day.day) }.getOrNull()
-                                    date?.let {
-                                        UnlockDay(
-                                            date = it,
-                                            unlocks = day.unlocks,
-                                            unlockedSeconds = day.unlockedSeconds,
-                                        )
-                                    }
-                                },
-                        )
+                    _state.value = _state.value.copy(unlockTrend = toUnlockDays(days))
                 }
             }
         viewModelScope.launch { repository.refresh() }
+    }
+
+    // Loaded on each open so the sheet is never showing a month that has moved on.
+    fun loadUnlockDetail() {
+        val repository = unlockStats() ?: return
+        _state.value = _state.value.copy(unlockDetailLoading = true)
+        viewModelScope.launch {
+            val days = repository.fetchWindow(DETAIL_DAYS)
+            _state.value =
+                _state.value.copy(
+                    unlockDetail = days?.let(::toUnlockDays) ?: _state.value.unlockDetail,
+                    unlockDetailLoading = false,
+                )
+        }
     }
 
     // A grant lands as a lock-state flip on the focus socket; the ledger it came
@@ -233,4 +239,20 @@ class ChatViewModel(
 
     private fun unlockStats(): UnlockStatsRepository? =
         FocusMonitorService.getInstance()?.getUnlockStats()
+
+    // A day the server labelled unparseably is dropped rather than drawn wrong.
+    private fun toUnlockDays(days: List<UnlockDayDto>): List<UnlockDay> =
+        days.mapNotNull { day ->
+            runCatching { LocalDate.parse(day.day) }.getOrNull()?.let { date ->
+                UnlockDay(
+                    date = date,
+                    unlocks = day.unlocks,
+                    unlockedSeconds = day.unlockedSeconds,
+                )
+            }
+        }
+
+    private companion object {
+        const val DETAIL_DAYS = 30
+    }
 }

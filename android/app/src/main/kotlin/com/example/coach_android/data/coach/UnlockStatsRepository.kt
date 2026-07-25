@@ -21,6 +21,11 @@ class UnlockStatsRepository(
         _stats.value = fetched
     }
 
+    // A longer window for the detail view. Not cached and not folded into stats:
+    // the card's week is what gets persisted, and a month of history would make
+    // its sparkline mean something else.
+    suspend fun fetchWindow(days: Int): List<UnlockDayDto>? = service.fetch(days)
+
     // A cache whose last day isn't today is describing a day that has ended, and
     // "3 unlocks today" would be a lie. Drop it and wait for the fetch.
     private fun freshCache(): List<UnlockDayDto> {
