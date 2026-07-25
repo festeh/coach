@@ -1,0 +1,35 @@
+package com.example.coach_android.data.coach
+
+import com.example.coach_android.data.preferences.PreferencesManager
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import java.time.LocalDate
+
+// Serves the coach's unlock ledger to the UI: the cache first so the header can
+// draw immediately, then the server's answer, which wins.
+class UnlockStatsRepository(
+    private val service: UnlockStatsService,
+    private val prefs: PreferencesManager,
+) {
+    private val _stats = MutableStateFlow(freshCache())
+    val stats: StateFlow<List<UnlockDayDto>> = _stats.asStateFlow()
+
+    suspend fun refresh(days: Int = TREND_DAYS) {
+        val fetched = service.fetch(days) ?: return
+        prefs.saveUnlockStats(fetched)
+        _stats.value = fetched
+    }
+
+    // A cache whose last day isn't today is describing a day that has ended, and
+    // "3 unlocks today" would be a lie. Drop it and wait for the fetch.
+    private fun freshCache(): List<UnlockDayDto> {
+        val cached = prefs.loadUnlockStats()
+        val today = LocalDate.now().toString()
+        return if (cached.lastOrNull()?.day == today) cached else emptyList()
+    }
+
+    companion object {
+        const val TREND_DAYS = 7
+    }
+}

@@ -201,6 +201,7 @@ fun ChatScreen(
                 streaming = state.streaming,
                 agentLocked = state.agentLocked,
                 releaseLeftSeconds = state.releaseLeftSeconds,
+                unlockTrend = state.unlockTrend,
                 onClear = { confirmClear = true },
                 onTakeOverride = { showOverrideDialog = true },
             )
@@ -289,6 +290,7 @@ private fun ChatHeader(
     streaming: Boolean,
     agentLocked: Boolean,
     releaseLeftSeconds: Int,
+    unlockTrend: List<UnlockDay>,
     onClear: () -> Unit,
     onTakeOverride: () -> Unit,
 ) {
@@ -311,115 +313,214 @@ private fun ChatHeader(
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
         tonalElevation = 2.dp,
     ) {
-        Row(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
                 modifier =
                     Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                        .border(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), CircleShape),
-                contentAlignment = Alignment.Center,
+                        .fillMaxWidth()
+                        .padding(
+                            start = 16.dp,
+                            end = 16.dp,
+                            top = 12.dp,
+                            bottom = if (unlockTrend.isEmpty()) 12.dp else 6.dp,
+                        ),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    imageVector = Icons.Default.SmartToy,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-
-            Spacer(Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Coach",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                Box(
+                    modifier =
+                        Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer)
+                            .border(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), CircleShape),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Box(
-                        modifier =
-                            Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(statusColor),
-                    )
-                    Text(
-                        text = statusText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            // Live lock state: a grant flips this chip in place of the old
-            // auto-close, so the coach's reply stays on screen.
-            val chipColor =
-                if (agentLocked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-            Surface(
-                shape = MaterialTheme.shapes.small,
-                color = chipColor.copy(alpha = 0.15f),
-            ) {
-                Text(
-                    text =
-                        if (agentLocked) {
-                            "Locked"
-                        } else {
-                            "Released · ${TimeFormatter.formatFocusTime(releaseLeftSeconds)}"
-                        },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = chipColor,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                )
-            }
-
-            Box {
-                IconButton(onClick = { menuExpanded = true }) {
                     Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = "More options",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        imageVector = Icons.Default.SmartToy,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp),
                     )
                 }
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false },
+
+                Spacer(Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Coach",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Box(
+                            modifier =
+                                Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(statusColor),
+                        )
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                // Live lock state: a grant flips this chip in place of the old
+                // auto-close, so the coach's reply stays on screen.
+                val chipColor =
+                    if (agentLocked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = chipColor.copy(alpha = 0.15f),
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("Take 15-minute override") },
-                        onClick = {
-                            menuExpanded = false
-                            onTakeOverride()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Clear conversation") },
-                        onClick = {
-                            menuExpanded = false
-                            onClear()
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = null,
-                            )
-                        },
+                    Text(
+                        text =
+                            if (agentLocked) {
+                                "Locked"
+                            } else {
+                                "Released · ${TimeFormatter.formatFocusTime(releaseLeftSeconds)}"
+                            },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = chipColor,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     )
                 }
+
+                Box {
+                    IconButton(onClick = { menuExpanded = true }) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "More options",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Take 15-minute override") },
+                            onClick = {
+                                menuExpanded = false
+                                onTakeOverride()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Clear conversation") },
+                            onClick = {
+                                menuExpanded = false
+                                onClear()
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = null,
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+
+            if (unlockTrend.isNotEmpty()) {
+                UnlockStatsStrip(trend = unlockTrend)
             }
         }
     }
 }
+
+// What today's asking has actually bought, next to the week it sits in — the
+// number the coach keeps quoting back, kept in view while you argue for more.
+@Composable
+private fun UnlockStatsStrip(trend: List<UnlockDay>) {
+    val today = trend.last()
+    val summary =
+        if (today.unlocks == 0) {
+            "No unlocks yet today"
+        } else {
+            val unit = if (today.unlocks == 1) "unlock" else "unlocks"
+            "${today.unlocks} $unit · ${TimeFormatter.formatFocusTime(today.unlockedSeconds)} today"
+        }
+    val weekSeconds = trend.sumOf { it.unlockedSeconds }
+    val dailyAverage = weekSeconds / trend.size
+
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = summary,
+            style = MaterialTheme.typography.labelMedium,
+            color =
+                if (today.unlocks == 0) {
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            modifier = Modifier.weight(1f),
+        )
+        UnlockSparkline(trend = trend)
+        // A week with nothing in it needs no average — "0s" only adds noise.
+        if (weekSeconds > 0) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "${trend.size}d avg ${TimeFormatter.formatFocusTime(dailyAverage)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
+    }
+}
+
+@Composable
+private fun UnlockSparkline(trend: List<UnlockDay>) {
+    val peak = trend.maxOf { it.unlockedSeconds }
+    val emptyColor = MaterialTheme.colorScheme.outlineVariant
+    val pastColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+    val todayColor = MaterialTheme.colorScheme.primary
+
+    Row(
+        modifier = Modifier.height(SPARK_MAX_HEIGHT),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        trend.forEachIndexed { index, day ->
+            // Zero days keep a stub so the week always reads as seven days.
+            val height =
+                if (day.unlockedSeconds <= 0 || peak <= 0) {
+                    SPARK_MIN_HEIGHT
+                } else {
+                    SPARK_MIN_HEIGHT +
+                        (SPARK_MAX_HEIGHT - SPARK_MIN_HEIGHT) * (day.unlockedSeconds.toFloat() / peak)
+                }
+            Box(
+                modifier =
+                    Modifier
+                        .width(6.dp)
+                        .height(height)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(
+                            when {
+                                day.unlockedSeconds <= 0 -> emptyColor
+                                index == trend.lastIndex -> todayColor
+                                else -> pastColor
+                            },
+                        ),
+            )
+        }
+    }
+}
+
+private val SPARK_MIN_HEIGHT = 3.dp
+private val SPARK_MAX_HEIGHT = 20.dp
 
 @Composable
 private fun MessageBubble(

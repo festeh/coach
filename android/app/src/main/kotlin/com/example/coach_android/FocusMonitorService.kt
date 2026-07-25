@@ -8,6 +8,7 @@ import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
 import com.example.coach_android.data.agentchat.AgentChatService
+import com.example.coach_android.data.coach.UnlockStatsRepository
 import com.example.coach_android.di.AppContainer
 import com.example.coach_android.service.MonitorLogic
 import kotlinx.coroutines.*
@@ -20,6 +21,7 @@ class FocusMonitorService : Service() {
 
     private var monitorLogic: MonitorLogic? = null
     private var agentChatService: AgentChatService? = null
+    private var unlockStats: UnlockStatsRepository? = null
     private var overlayManager: OverlayManager? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -162,6 +164,11 @@ class FocusMonitorService : Service() {
             val logic = container.monitorLogic
             monitorLogic = logic
             agentChatService = container.agentChatService
+            unlockStats =
+                UnlockStatsRepository(
+                    service = container.unlockStatsService,
+                    prefs = container.preferencesManager,
+                )
             logic.applicationContext = applicationContext
 
             // Wire overlay manager directly (no Activity dependency)
@@ -202,6 +209,8 @@ class FocusMonitorService : Service() {
     fun getMonitorLogic(): MonitorLogic? = monitorLogic
 
     fun getAgentChatService(): AgentChatService? = agentChatService
+
+    fun getUnlockStats(): UnlockStatsRepository? = unlockStats
 
     fun reconcileMonitoringPermission() {
         if (isRunning.get()) {
