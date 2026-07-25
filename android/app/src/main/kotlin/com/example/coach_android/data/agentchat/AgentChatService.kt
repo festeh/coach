@@ -1,6 +1,7 @@
 package com.example.coach_android.data.agentchat
 
 import android.util.Log
+import com.example.coach_android.util.SafeUrl
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -163,7 +164,7 @@ class AgentChatService(
     private fun openSocket() {
         isConnecting = true
         scope.launch { _events.emit(ChatEvent.Connecting) }
-        Log.i(tag, "Connecting to agent chat: $wsUrl")
+        Log.i(tag, "Connecting to agent chat: ${SafeUrl.redacted(wsUrl)}")
         val request = Request.Builder().url(wsUrl).build()
         webSocket = client.newWebSocket(request, listener)
     }

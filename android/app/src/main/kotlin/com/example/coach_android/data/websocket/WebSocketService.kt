@@ -1,6 +1,7 @@
 package com.example.coach_android.data.websocket
 
 import android.util.Log
+import com.example.coach_android.util.SafeUrl
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -52,7 +53,9 @@ class WebSocketService(
             "isConnected" to isConnected,
             "isConnecting" to isConnecting,
             "reconnectAttempts" to reconnectAttempts,
-            "websocketUrl" to url,
+            // Redacted here rather than at the Debug screen that renders it, so a
+            // future reader of this map cannot reintroduce the leak.
+            "websocketUrl" to SafeUrl.redacted(url),
         )
 
     fun initialize() {
@@ -71,7 +74,7 @@ class WebSocketService(
         }
 
         isConnecting = true
-        Log.i(tag, "Connecting to WebSocket: $url")
+        Log.i(tag, "Connecting to WebSocket: ${SafeUrl.redacted(url)}")
 
         val request = Request.Builder().url(url).build()
         webSocket =
@@ -304,7 +307,10 @@ class WebSocketService(
                 waited += interval
             }
             if (!isConnected) {
-                throw Exception("Could not establish WebSocket connection after ${waited / 1000}s. URL: $url")
+                throw Exception(
+                    "Could not establish WebSocket connection after ${waited / 1000}s. " +
+                        "URL: ${SafeUrl.redacted(url)}",
+                )
             }
             Log.i(tag, "WebSocket connection established for focus status request")
 
