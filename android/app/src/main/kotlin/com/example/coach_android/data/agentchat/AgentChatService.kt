@@ -1,6 +1,7 @@
 package com.example.coach_android.data.agentchat
 
 import android.util.Log
+import com.example.coach_android.util.SafeUrl
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -10,7 +11,6 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
@@ -164,7 +164,7 @@ class AgentChatService(
     private fun openSocket() {
         isConnecting = true
         scope.launch { _events.emit(ChatEvent.Connecting) }
-        Log.i(tag, "Connecting to agent chat: $wsUrl")
+        Log.i(tag, "Connecting to agent chat: ${SafeUrl.redacted(wsUrl)}")
         val request = Request.Builder().url(wsUrl).build()
         webSocket = client.newWebSocket(request, listener)
     }
@@ -245,13 +245,13 @@ class AgentChatService(
         }
     }
 
+    // Retried as long as a screen wants the socket — shouldReconnect is cleared on
+    // disconnect(), so this stops when the chat closes rather than after a fixed
+    // number of tries. A capped attempt count used to leave the chat dead after a
+    // server restart, with only the error banner's Retry to bring it back.
     private fun scheduleReconnect() {
         if (!shouldReconnect) return
         if (reconnectJob?.isActive == true) return
-        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            Log.e(tag, "Agent chat: giving up after $reconnectAttempts attempts")
-            return
-        }
         reconnectAttempts++
         val delayMs =
             (BASE_RECONNECT_DELAY_MS * 2.0.pow(min(reconnectAttempts - 1, 6).toDouble())).toLong() +
@@ -270,7 +270,6 @@ class AgentChatService(
     }
 
     companion object {
-        private const val MAX_RECONNECT_ATTEMPTS = 5
         private const val BASE_RECONNECT_DELAY_MS = 1500L
     }
 }

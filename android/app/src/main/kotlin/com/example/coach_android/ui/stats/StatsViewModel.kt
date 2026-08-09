@@ -77,7 +77,7 @@ class StatsViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val sessions = eventDao.countFocusSessions(dayStart, dayEnd)
-                val totalTime = eventDao.totalFocusTime(dayStart, dayEnd) ?: 0
+                val totalTime = eventDao.totalFocusTime(dayStart, dayEnd)
                 val blocked = eventDao.countBlockedAppOpens(dayStart, dayEnd)
 
                 val blockedApps =

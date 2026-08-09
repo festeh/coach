@@ -2,6 +2,7 @@ package com.example.coach_android.data.preferences
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.coach_android.data.coach.UnlockDayDto
 import com.example.coach_android.data.model.AppRule
 import com.example.coach_android.data.model.AppSettings
 import com.example.coach_android.data.model.FocusData
@@ -89,6 +90,24 @@ class PreferencesManager(
         val fresh = java.util.UUID.randomUUID().toString()
         prefs.edit().putString("agentChatThreadId", fresh).apply()
         return fresh
+    }
+
+    // --- Unlock stats cache ---
+
+    // The chat header shows the coach's unlock ledger, which lives on the server.
+    // Cached verbatim so the header has something true to draw while the fetch is
+    // in flight or the network is gone.
+    fun loadUnlockStats(): List<UnlockDayDto> {
+        val jsonStr = prefs.getString("unlockStats", null) ?: return emptyList()
+        return try {
+            json.decodeFromString<List<UnlockDayDto>>(jsonStr)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveUnlockStats(stats: List<UnlockDayDto>) {
+        prefs.edit().putString("unlockStats", json.encodeToString(stats)).apply()
     }
 
     // --- Pending Challenges ---

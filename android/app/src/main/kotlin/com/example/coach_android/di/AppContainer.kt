@@ -2,6 +2,7 @@ package com.example.coach_android.di
 
 import android.content.Context
 import com.example.coach_android.data.agentchat.AgentChatService
+import com.example.coach_android.data.coach.UnlockStatsService
 import com.example.coach_android.data.db.UsageDatabase
 import com.example.coach_android.data.preferences.PreferencesManager
 import com.example.coach_android.data.websocket.WebSocketService
@@ -21,6 +22,12 @@ class AppContainer(
     // The token rides the query string on both sockets — OkHttp could set a
     // header, but the browser clients can't, so the server speaks query-param.
     val webSocketService = WebSocketService(withToken(webSocketUrl, apiToken))
+
+    val unlockStatsService =
+        UnlockStatsService(
+            webSocketUrl = webSocketUrl,
+            apiToken = apiToken,
+        )
 
     val agentChatService =
         AgentChatService(

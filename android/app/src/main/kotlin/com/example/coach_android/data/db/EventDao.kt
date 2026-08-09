@@ -4,12 +4,6 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 
-data class DailyStats(
-    val focusCount: Int,
-    val totalFocusTimeSeconds: Int,
-    val blockedAppOpens: Int,
-)
-
 data class BlockedAppEntry(
     @androidx.room.ColumnInfo(name = "package_name") val packageName: String,
     val count: Int,
@@ -68,21 +62,5 @@ interface EventDao {
     suspend fun blockedAppsForDay(
         startTimestamp: Long,
         endTimestamp: Long,
-    ): List<BlockedAppEntry>
-
-    @Query(
-        """
-        SELECT package_name, COUNT(*) as count FROM events
-        WHERE event_type = 'app_opened' AND during_focus = 1
-        AND timestamp >= :startTimestamp AND timestamp < :endTimestamp
-        AND package_name IN (:packages)
-        GROUP BY package_name
-        ORDER BY count DESC
-    """,
-    )
-    suspend fun blockedAppsForDayFiltered(
-        startTimestamp: Long,
-        endTimestamp: Long,
-        packages: List<String>,
     ): List<BlockedAppEntry>
 }

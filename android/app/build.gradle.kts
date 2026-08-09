@@ -9,10 +9,8 @@ plugins {
 android {
     namespace = "com.example.coach_android"
     compileSdk = 35
-    ndkVersion = "27.0.12077973"
 
     compileOptions {
-        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
@@ -46,8 +44,6 @@ android {
 }
 
 dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-
     // Room
     val roomVersion = "2.7.0"
     implementation("androidx.room:room-runtime:$roomVersion")
@@ -69,7 +65,6 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // Activity Compose

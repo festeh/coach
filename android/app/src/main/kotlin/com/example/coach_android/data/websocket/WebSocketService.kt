@@ -1,6 +1,7 @@
 package com.example.coach_android.data.websocket
 
 import android.util.Log
+import com.example.coach_android.util.SafeUrl
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -41,16 +42,20 @@ class WebSocketService(
     private val _focusUpdates = MutableSharedFlow<Map<String, Any?>>(extraBufferCapacity = 16)
     val focusUpdates: SharedFlow<Map<String, Any?>> = _focusUpdates.asSharedFlow()
 
-    val connected: Boolean get() = isConnected
+    // The server declining an override or a short unblock. The phone can usually
+    // predict this from the cooldown it already holds, but its copy is up to a
+    // poll interval stale, so the refusal is what settles a close call.
+    private val _unblockRefusals = MutableSharedFlow<Map<String, Any?>>(extraBufferCapacity = 8)
+    val unblockRefusals: SharedFlow<Map<String, Any?>> = _unblockRefusals.asSharedFlow()
 
     fun getConnectionStatus(): Map<String, Any?> =
         mapOf(
             "isConnected" to isConnected,
             "isConnecting" to isConnecting,
             "reconnectAttempts" to reconnectAttempts,
-            "hasPendingRequest" to (pendingRequest != null),
-            "hasWebSocket" to (webSocket != null),
-            "websocketUrl" to url,
+            // Redacted here rather than at the Debug screen that renders it, so a
+            // future reader of this map cannot reintroduce the leak.
+            "websocketUrl" to SafeUrl.redacted(url),
         )
 
     fun initialize() {
@@ -69,7 +74,7 @@ class WebSocketService(
         }
 
         isConnecting = true
-        Log.i(tag, "Connecting to WebSocket: $url")
+        Log.i(tag, "Connecting to WebSocket: ${SafeUrl.redacted(url)}")
 
         val request = Request.Builder().url(url).build()
         webSocket =
@@ -133,19 +138,25 @@ class WebSocketService(
             val dataMap = jsonObjectToMap(data)
             val messageType = (data["type"]?.jsonPrimitive?.content)
 
-            // Handle response to pending request
+            if (messageType == "unblock_refused") {
+                Log.i(tag, "Unblock refused by server: $text")
+                scope.launch { _unblockRefusals.emit(dataMap) }
+                return
+            }
+
+            // Handle response to pending request. Gated on the frame type a
+            // get_focusing reply actually has, so an unsolicited frame arriving
+            // mid-request is no longer swallowed as its answer.
             val pending = pendingRequest
-            if (pending != null) {
+            if (pending != null && messageType == "focusing") {
                 pendingRequest = null
                 pending.complete(dataMap)
                 return
             }
 
-            // Emit focus updates
-            if (messageType == "focusing" ||
-                messageType == "focusing_status" ||
-                (messageType == null && data.containsKey("focusing"))
-            ) {
+            // Emit focus updates. The server stamps every focus frame with this
+            // type, both for broadcasts and for get_focusing replies.
+            if (messageType == "focusing") {
                 scope.launch { _focusUpdates.emit(dataMap) }
                 Log.d(tag, "Focus update emitted: focusing=${data["focusing"]}")
             }
@@ -167,13 +178,12 @@ class WebSocketService(
         }
     }
 
+    // Retried for as long as the service lives. Giving up after a fixed number of
+    // attempts left the app silently offline — a server restart during a deploy
+    // cost the socket until someone hit Refresh — and the phone can't tell a
+    // finished outage from an ongoing one without trying.
     private fun scheduleReconnect() {
         if (reconnectJob?.isActive == true) return
-
-        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            Log.e(tag, "Max reconnection attempts reached ($reconnectAttempts). Giving up.")
-            return
-        }
 
         reconnectAttempts++
 
@@ -257,6 +267,12 @@ class WebSocketService(
         )
     }
 
+    // The way out of a cooldown: 30 seconds, no reason asked. The server decides
+    // whether the allowance is there and answers with a refusal if it is not.
+    fun sendShortUnblock() {
+        sendMessage(mapOf("type" to "short_unblock"))
+    }
+
     suspend fun sendFocusCommand(durationMinutes: Int = 0) {
         Log.i(tag, "Sending focus command (duration=${durationMinutes}m)")
         if (!isConnected) throw Exception("WebSocket not connected")
@@ -291,7 +307,10 @@ class WebSocketService(
                 waited += interval
             }
             if (!isConnected) {
-                throw Exception("Could not establish WebSocket connection after ${waited / 1000}s. URL: $url")
+                throw Exception(
+                    "Could not establish WebSocket connection after ${waited / 1000}s. " +
+                        "URL: ${SafeUrl.redacted(url)}",
+                )
             }
             Log.i(tag, "WebSocket connection established for focus status request")
 
@@ -326,7 +345,6 @@ class WebSocketService(
     }
 
     companion object {
-        private const val MAX_RECONNECT_ATTEMPTS = 10
         private const val BASE_RECONNECT_DELAY_MS = 2000L
         private const val FOCUS_QUERY_INTERVAL_MS = 60_000L
 
