@@ -2,7 +2,7 @@
   "name": "coach",
   "description": "Your guide to a better focusing",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "wxt -b chrome",
@@ -13,7 +13,7 @@
     "zip": "wxt zip -b chrome",
     "zip:firefox": "wxt zip -b firefox",
     "install:chrome": "wxt build -b chrome && ln -sf ../../public/whitelist-chrome.txt dist/chrome-mv3/whitelist-chrome.txt",
-    "install:firefox": "wxt zip -b firefox && cp dist/coach-*-firefox.zip ~/.mozilla/firefox/*.dev-edition-default/extensions/coach@dimalip.in.xpi",
+    "install:firefox": "wxt zip -b firefox && cp dist/coach-${npm_package_version}-firefox.zip ~/.mozilla/firefox/*.dev-edition-default/extensions/coach@dimalip.in.xpi",
     "install:browsers": "npm run install:firefox && npm run install:chrome",
     "install:host": "bash scripts/install-native-host.sh",
     "check": "svelte-check --tsconfig ./tsconfig.json",
