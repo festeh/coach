@@ -32,14 +32,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".ui.chat.ChatActivity"
-            android:exported="false"
-            android:launchMode="singleTop"
-            android:theme="@style/LaunchTheme"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
-            android:windowSoftInputMode="adjustResize" />
-
         <!-- Focus Monitor Background Service -->
         <service
             android:name=".FocusMonitorService"

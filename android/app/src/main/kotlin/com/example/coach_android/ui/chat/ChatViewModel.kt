@@ -60,17 +60,10 @@ class ChatViewModel(
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
-    private var forced: Boolean = false
     private var eventsJob: Job? = null
     private var focusJob: Job? = null
     private var statsJob: Job? = null
     private var tickJob: Job? = null
-
-    fun setForced(value: Boolean) {
-        forced = value
-    }
-
-    fun isForced(): Boolean = forced
 
     fun onStart() {
         val chat = chatService() ?: run {

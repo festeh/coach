@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -44,10 +45,24 @@ private val bottomTabs = listOf(Screen.Apps, Screen.Chat, Screen.Stats)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppNavigation() {
+fun AppNavigation(chatRequestId: Int = 0) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
+
+    // A forced wall (blocked app under an engaged agent lock) asks for the
+    // chat tab through this counter; 0 means nobody has asked yet.
+    LaunchedEffect(chatRequestId) {
+        if (chatRequestId > 0) {
+            navController.navigate(Screen.Chat.route) {
+                popUpTo(navController.graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
 
     val currentRoute = currentDestination?.route
     val showBottomBar = currentRoute in bottomTabs.map { it.route }
@@ -141,8 +156,8 @@ fun AppNavigation() {
             }
             composable(Screen.Chat.route) {
                 val chatViewModel: ChatViewModel = viewModel()
-                // Tab visibility drives the socket the way ChatActivity's
-                // onStart/onStop lifecycle does for the forced wall.
+                // Tab visibility drives the socket: connect while the chat is
+                // on screen, disconnect when it leaves.
                 DisposableEffect(Unit) {
                     chatViewModel.onStart()
                     onDispose { chatViewModel.onStop() }

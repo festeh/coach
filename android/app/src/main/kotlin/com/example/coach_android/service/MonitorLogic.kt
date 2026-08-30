@@ -7,6 +7,7 @@ import com.example.coach_android.data.db.EventDao
 import com.example.coach_android.data.db.EventEntity
 import com.example.coach_android.data.db.RuleCounterDao
 import com.example.coach_android.data.model.AppRule
+import com.example.coach_android.MainActivity
 import com.example.coach_android.data.model.FocusData
 import com.example.coach_android.data.preferences.PreferencesManager
 import com.example.coach_android.data.websocket.WebSocketService
@@ -35,7 +36,7 @@ class MonitorLogic(
 
     var overlayManager: com.example.coach_android.OverlayManager? = null
 
-    // Set by FocusMonitorService after construction. Used to launch ChatActivity
+    // Set by FocusMonitorService after construction. Used to launch the chat wall
     // when the agent lock blocks a monitored app.
     var applicationContext: Context? = null
 
@@ -174,7 +175,7 @@ class MonitorLogic(
                         // the chat, then drop it so it can't cover the chat.
                         withContext(Dispatchers.Main) {
                             overlayManager?.show(packageName)
-                            launchChatActivity(forced = true)
+                            launchForcedChat()
                             overlayManager?.hide()
                         }
                     }
@@ -217,7 +218,7 @@ class MonitorLogic(
                 scope.launch {
                     withContext(Dispatchers.Main) {
                         overlayManager?.show(packageName)
-                        launchChatActivity(forced = true)
+                        launchForcedChat()
                         overlayManager?.hide()
                     }
                 }
@@ -226,18 +227,21 @@ class MonitorLogic(
         }
     }
 
-    private fun launchChatActivity(forced: Boolean) {
+    // The wall is the main activity on its chat tab, not a bare chat screen:
+    // the bottom bar stays, so the rest of the app is one tap away even while
+    // the coach is being argued with.
+    private fun launchForcedChat() {
         val ctx = applicationContext ?: return
         val intent =
-            Intent().apply {
-                setClassName(ctx, "com.example.coach_android.ui.chat.ChatActivity")
+            Intent(ctx, MainActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                putExtra("EXTRA_FORCED", forced)
+                putExtra(MainActivity.EXTRA_OPEN_CHAT, true)
+                putExtra(MainActivity.EXTRA_FORCED, true)
             }
         try {
             ctx.startActivity(intent)
         } catch (e: Exception) {
-            Log.e(tag, "Failed to launch ChatActivity: ${e.message}")
+            Log.e(tag, "Failed to launch the chat wall: ${e.message}")
         }
     }
 

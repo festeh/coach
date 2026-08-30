@@ -7,16 +7,40 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.mutableIntStateOf
 import com.example.coach_android.ui.navigation.AppNavigation
 import com.example.coach_android.ui.theme.CoachTheme
 
 class MainActivity : ComponentActivity() {
     companion object {
         const val TAG = "MainActivity"
+
+        // The forced wall: a blocked app opened while the agent lock was on.
+        // It lands here, on the chat tab, so the bottom bar stays in reach —
+        // not in a bare chat activity with no way to the rest of the app.
+        const val EXTRA_OPEN_CHAT = "EXTRA_OPEN_CHAT"
+        const val EXTRA_FORCED = "EXTRA_FORCED"
     }
+
+    // Bumped on every launch that asks for the chat tab; AppNavigation watches
+    // it. A counter, not a flag, so a second wall re-navigates even when the
+    // first request is still the current one.
+    private val chatRequests = mutableIntStateOf(0)
+
+    // A forced wall must not let back fall through to the blocked app right
+    // underneath — that would bounce straight into another block. Send the
+    // user home instead, once per forced entry.
+    private val forcedBack =
+        object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() {
+                isEnabled = false
+                goHome()
+            }
+        }
 
     // On Android 13+ notifications are opt-in, and a side-loaded install never
     // sees an install-time prompt. Without the grant the system silently drops
@@ -32,6 +56,8 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "onCreate")
 
         enableEdgeToEdge()
+        onBackPressedDispatcher.addCallback(this, forcedBack)
+        handleLaunchIntent(intent)
 
         ensureNotificationsAllowed()
 
@@ -40,8 +66,34 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             CoachTheme {
-                AppNavigation()
+                AppNavigation(chatRequestId = chatRequests.intValue)
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleLaunchIntent(intent)
+    }
+
+    private fun handleLaunchIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_OPEN_CHAT, false) == true) {
+            chatRequests.intValue++
+        }
+        if (intent?.getBooleanExtra(EXTRA_FORCED, false) == true) {
+            forcedBack.isEnabled = true
+        }
+    }
+
+    private fun goHome() {
+        val homeIntent =
+            Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+        try {
+            startActivity(homeIntent)
+        } catch (_: Exception) {
         }
     }
 
