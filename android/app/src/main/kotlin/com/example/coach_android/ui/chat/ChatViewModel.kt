@@ -9,6 +9,7 @@ import com.example.coach_android.data.agentchat.ChatEvent
 import com.example.coach_android.data.agentchat.ChatMessage
 import com.example.coach_android.data.coach.UnlockDayDto
 import com.example.coach_android.data.coach.UnlockStatsRepository
+import com.example.coach_android.data.model.OverridePhase
 import com.example.coach_android.util.TimeFormatter
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -39,17 +40,18 @@ data class ChatUiState(
     // card's week so the sheet has something to show while the month arrives.
     val unlockDetail: List<UnlockDay> = emptyList(),
     val unlockDetailLoading: Boolean = false,
-    // Override cooldown. remaining counts down locally between server frames;
-    // the rest changes only when a decision is made.
+    // The override as the server runs it. The remaining seconds count down
+    // locally between server frames; the rest changes only on a decision.
     val overridesToday: Int = 0,
+    val overridePhase: OverridePhase = OverridePhase.IDLE,
+    // Priced by the server, not derived here: the escalation rule lives there.
     val cooldownSeconds: Int = 0,
     val cooldownRemaining: Int = 0,
-    // Priced by the server, not derived here: the escalation rule lives there.
+    val redeemRemaining: Int = 0,
     val nextCooldownSeconds: Int = 0,
-    val shortUnblocksLeft: Int = 0,
-    val refusal: String? = null,
 ) {
-    val coolingDown: Boolean get() = cooldownRemaining > 0
+    val coolingDown: Boolean get() = overridePhase == OverridePhase.COOLING
+    val overrideReady: Boolean get() = overridePhase == OverridePhase.READY
 }
 
 class ChatViewModel(
@@ -62,7 +64,6 @@ class ChatViewModel(
     private var eventsJob: Job? = null
     private var focusJob: Job? = null
     private var statsJob: Job? = null
-    private var refusalJob: Job? = null
     private var tickJob: Job? = null
 
     fun setForced(value: Boolean) {
@@ -94,67 +95,59 @@ class ChatViewModel(
                             agentLocked = data.isAgentLocked,
                             releaseLeftSeconds = data.agentReleaseTimeLeft ?: 0,
                             overridesToday = data.overridesToday,
+                            overridePhase = data.overridePhase,
                             cooldownSeconds = data.cooldownSeconds,
                             cooldownRemaining = data.cooldownRemaining,
+                            redeemRemaining = data.redeemRemaining,
                             nextCooldownSeconds = data.nextCooldownSeconds,
-                            shortUnblocksLeft = data.shortUnblocksLeft,
                         )
-                    // The server's number is the truth; resync the local clock to it.
-                    startCooldownTicker()
+                    // The server's numbers are the truth; resync the local clock.
+                    startOverrideTicker()
                     if (wasLocked && !data.isAgentLocked) {
                         refreshStatsAfterGrant()
                     }
-                }
-            }
-        refusalJob?.cancel()
-        refusalJob =
-            viewModelScope.launch {
-                FocusMonitorService.getInstance()?.getMonitorLogic()?.unblockRefusals?.collect { data ->
-                    val remaining = (data["override_cooldown_remaining"] as? Number)?.toInt() ?: 0
-                    val left = (data["short_unblocks_left"] as? Number)?.toInt() ?: 0
-                    _state.value =
-                        _state.value.copy(
-                            cooldownRemaining = remaining,
-                            shortUnblocksLeft = left,
-                            overridesToday = (data["overrides_today"] as? Number)?.toInt() ?: _state.value.overridesToday,
-                            cooldownSeconds = (data["override_cooldown_seconds"] as? Number)?.toInt() ?: _state.value.cooldownSeconds,
-                            refusal =
-                                if (data["request"] == "short_unblock") {
-                                    "No 30-second unblocks left in this cooldown."
-                                } else {
-                                    "Still cooling down — ${TimeFormatter.formatCountdown(remaining)} to go."
-                                },
-                        )
-                    startCooldownTicker()
                 }
             }
         observeUnlockStats()
         chat.connect()
     }
 
-    // The server sends the cooldown once per frame, so the phone runs the clock
-    // in between. Every server frame resyncs it, which keeps drift from stacking.
-    private fun startCooldownTicker() {
+    // The server sends the override state once per frame, so the phone runs the
+    // clock in between. Every frame resyncs it, which keeps drift from stacking.
+    // When a countdown or redeem window runs out locally, the phase has changed
+    // on the server without a broadcast — ask for a frame instead of guessing
+    // what it became.
+    private fun startOverrideTicker() {
         tickJob?.cancel()
-        if (_state.value.cooldownRemaining <= 0) return
+        val ticking =
+            when (_state.value.overridePhase) {
+                OverridePhase.COOLING -> _state.value.cooldownRemaining > 0
+                OverridePhase.READY -> _state.value.redeemRemaining > 0
+                OverridePhase.IDLE -> false
+            }
+        if (!ticking) return
         tickJob =
             viewModelScope.launch {
-                while (_state.value.cooldownRemaining > 0) {
+                while (true) {
                     delay(1_000)
-                    val left = _state.value.cooldownRemaining - 1
+                    val current = _state.value
+                    val left =
+                        when (current.overridePhase) {
+                            OverridePhase.COOLING -> (current.cooldownRemaining - 1).coerceAtLeast(0)
+                            OverridePhase.READY -> (current.redeemRemaining - 1).coerceAtLeast(0)
+                            OverridePhase.IDLE -> return@launch
+                        }
                     _state.value =
-                        _state.value.copy(
-                            cooldownRemaining = left.coerceAtLeast(0),
-                            // The hatch only exists inside a cooldown; when the
-                            // wait ends the full override is back on the table.
-                            shortUnblocksLeft = if (left <= 0) 0 else _state.value.shortUnblocksLeft,
-                        )
+                        when (current.overridePhase) {
+                            OverridePhase.COOLING -> current.copy(cooldownRemaining = left)
+                            else -> current.copy(redeemRemaining = left)
+                        }
+                    if (left == 0) {
+                        FocusMonitorService.getInstance()?.getMonitorLogic()?.refreshFocusState()
+                        return@launch
+                    }
                 }
             }
-    }
-
-    fun dismissRefusal() {
-        _state.value = _state.value.copy(refusal = null)
     }
 
     fun onStop() {
@@ -164,8 +157,6 @@ class ChatViewModel(
         focusJob = null
         statsJob?.cancel()
         statsJob = null
-        refusalJob?.cancel()
-        refusalJob = null
         tickJob?.cancel()
         tickJob = null
         chatService()?.disconnect()
@@ -231,25 +222,33 @@ class ChatViewModel(
         }
     }
 
+    // One tap, whatever the phase; the server decides what it means. Idle needs
+    // the written reason (it grants the day's first or arms the countdown);
+    // ready redeems bare; cooling is answered locally to spare the round trip —
+    // the server is still the authority and would refuse it the same way.
     fun takeOverride(reason: String): Result<Unit> {
-        val trimmedReason = reason.trim()
-        if (trimmedReason.isEmpty()) {
-            return Result.failure(IllegalArgumentException("A reason is required"))
-        }
-        // The server is the authority and refuses on its own; checking here just
-        // spares the round trip and answers in the dialog the user is looking at.
-        if (_state.value.coolingDown) {
-            val left = TimeFormatter.formatCountdown(_state.value.cooldownRemaining)
-            return Result.failure(IllegalStateException("Still cooling down — $left to go"))
-        }
         val monitorLogic =
             FocusMonitorService.getInstance()?.getMonitorLogic()
                 ?: return Result.failure(IllegalStateException("Coach service is not available"))
-        return runCatching { monitorLogic.takeOverride(trimmedReason) }
+        return when (_state.value.overridePhase) {
+            OverridePhase.READY -> runCatching { monitorLogic.takeOverride("") }
+            OverridePhase.COOLING -> {
+                val left = TimeFormatter.formatCountdown(_state.value.cooldownRemaining)
+                Result.failure(IllegalStateException("Still waiting — $left to go"))
+            }
+            OverridePhase.IDLE -> {
+                val trimmedReason = reason.trim()
+                if (trimmedReason.isEmpty()) {
+                    Result.failure(IllegalArgumentException("A reason is required"))
+                } else {
+                    runCatching { monitorLogic.takeOverride(trimmedReason) }
+                }
+            }
+        }
     }
 
-    // The escape hatch inside a cooldown. No reason is asked: 30 seconds is short
-    // enough that the friction would cost more than it buys.
+    // The peek: 30 seconds, no reason asked, never refused. The nag of tapping
+    // again every half-minute is the only price.
     fun takeShortUnblock(): Result<Unit> {
         val monitorLogic =
             FocusMonitorService.getInstance()?.getMonitorLogic()

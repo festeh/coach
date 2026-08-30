@@ -74,6 +74,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.coach_android.data.agentchat.ChatMessage
+import com.example.coach_android.data.model.OverridePhase
 import com.example.coach_android.util.TimeFormatter
 import java.time.LocalDate
 import java.time.format.TextStyle
@@ -91,7 +92,7 @@ fun ChatScreen(
     var input by remember { mutableStateOf("") }
     var confirmClear by remember { mutableStateOf(false) }
     var showUnlockDetail by remember { mutableStateOf(false) }
-    var overrideStage by remember { mutableStateOf(OverrideStage.Closed) }
+    var overrideDialogOpen by remember { mutableStateOf(false) }
     var overrideReason by remember { mutableStateOf("") }
     var overrideError by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
@@ -141,32 +142,26 @@ fun ChatScreen(
         )
     }
 
-    if (overrideStage != OverrideStage.Closed) {
+    if (overrideDialogOpen) {
         val close = {
-            overrideStage = OverrideStage.Closed
+            overrideDialogOpen = false
             overrideReason = ""
             overrideError = null
         }
         OverrideDialog(
-            stage = overrideStage,
             reason = overrideReason,
             error = overrideError,
             overridesToday = state.overridesToday,
-            nextCooldownSeconds = state.nextCooldownSeconds,
+            cooldownSeconds = state.cooldownSeconds,
             onReasonChange = {
                 overrideReason = it
                 overrideError = null
             },
-            // Writing the reason no longer takes the override — it only earns the
-            // right to be asked again, on a screen that names the cost.
-            onContinue = { overrideStage = OverrideStage.Confirm },
-            onBack = { overrideStage = OverrideStage.Reason },
             onConfirm = {
                 viewModel.takeOverride(overrideReason).fold(
                     onSuccess = { close() },
                     onFailure = { error ->
-                        overrideStage = OverrideStage.Reason
-                        overrideError = error.message ?: "Could not take the override"
+                        overrideError = error.message ?: "Could not request the override"
                     },
                 )
             },
@@ -190,23 +185,28 @@ fun ChatScreen(
                 streaming = state.streaming,
                 agentLocked = state.agentLocked,
                 releaseLeftSeconds = state.releaseLeftSeconds,
-                coolingDown = state.coolingDown,
+                overridePhase = state.overridePhase,
+                overridesToday = state.overridesToday,
+                cooldownSeconds = state.cooldownSeconds,
                 cooldownRemaining = state.cooldownRemaining,
+                redeemRemaining = state.redeemRemaining,
                 onClear = { confirmClear = true },
-                onTakeOverride = { overrideStage = OverrideStage.Reason },
+                onRequestOverride = { overrideDialogOpen = true },
+                onRedeemOverride = { viewModel.takeOverride("") },
+                onPeek = { viewModel.takeShortUnblock() },
             )
 
-            // Only while the lock is actually on. During a release the next
-            // override is far off, but nobody needs one, and a red banner over a
-            // window you were granted reads as an alarm about nothing.
-            if ((state.coolingDown && state.agentLocked) || state.refusal != null) {
-                CooldownBanner(
-                    remaining = state.cooldownRemaining,
+            // While a request is live, its state is stated plainly rather than
+            // hidden behind a menu item: the countdown to come back for, or the
+            // window to claim in before it evaporates.
+            if (state.overridePhase != OverridePhase.IDLE) {
+                OverrideBanner(
+                    phase = state.overridePhase,
+                    cooldownRemaining = state.cooldownRemaining,
+                    redeemRemaining = state.redeemRemaining,
                     overridesToday = state.overridesToday,
-                    shortUnblocksLeft = state.shortUnblocksLeft,
-                    refusal = state.refusal,
-                    onShortUnblock = { viewModel.takeShortUnblock() },
-                    onDismissRefusal = viewModel::dismissRefusal,
+                    onPeek = { viewModel.takeShortUnblock() },
+                    onRedeem = { viewModel.takeOverride("") },
                 )
             }
 
@@ -304,10 +304,15 @@ private fun ChatHeader(
     streaming: Boolean,
     agentLocked: Boolean,
     releaseLeftSeconds: Int,
-    coolingDown: Boolean,
+    overridePhase: OverridePhase,
+    overridesToday: Int,
+    cooldownSeconds: Int,
     cooldownRemaining: Int,
+    redeemRemaining: Int,
     onClear: () -> Unit,
-    onTakeOverride: () -> Unit,
+    onRequestOverride: () -> Unit,
+    onRedeemOverride: () -> Unit,
+    onPeek: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val statusText = when {
@@ -416,17 +421,31 @@ private fun ChatHeader(
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    if (coolingDown) {
-                                        "Override · ${TimeFormatter.formatCountdown(cooldownRemaining)} to go"
-                                    } else {
-                                        "Take 15-minute override"
+                                    when (overridePhase) {
+                                        OverridePhase.COOLING ->
+                                            "Override in ${TimeFormatter.formatCountdown(cooldownRemaining)}"
+                                        OverridePhase.READY ->
+                                            "Take your 15 minutes · ${TimeFormatter.formatCountdown(redeemRemaining)} left"
+                                        OverridePhase.IDLE ->
+                                            if (overridesToday == 0) {
+                                                "Take 15-minute override"
+                                            } else {
+                                                "Request override · ${TimeFormatter.formatCountdown(cooldownSeconds)} wait"
+                                            }
                                     },
                                 )
                             },
-                            enabled = !coolingDown,
+                            enabled = overridePhase != OverridePhase.COOLING,
                             onClick = {
                                 menuExpanded = false
-                                onTakeOverride()
+                                if (overridePhase == OverridePhase.READY) onRedeemOverride() else onRequestOverride()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Peek · 30 seconds") },
+                            onClick = {
+                                menuExpanded = false
+                                onPeek()
                             },
                         )
                         DropdownMenuItem(
@@ -450,168 +469,125 @@ private fun ChatHeader(
     }
 }
 
-// An override used to cost one tap on a filled-in reason. Now the reason only
-// buys the question, and the confirmation names the price before it is paid.
-private enum class OverrideStage { Closed, Reason, Confirm }
-
+// The reason buys the request, not the override: after the first of the day,
+// the tap only starts the wait, and the 15 minutes are taken by coming back
+// once it lapses.
 @Composable
 private fun OverrideDialog(
-    stage: OverrideStage,
     reason: String,
     error: String?,
     overridesToday: Int,
-    nextCooldownSeconds: Int,
+    cooldownSeconds: Int,
     onReasonChange: (String) -> Unit,
-    onContinue: () -> Unit,
-    onBack: () -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val confirming = stage == OverrideStage.Confirm
+    val firstOfTheDay = overridesToday == 0
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (confirming) "Confirm override" else "Take a 15-minute override?") },
+        title = { Text(if (firstOfTheDay) "Take a 15-minute override?" else "Request an override?") },
         text = {
             Column {
-                if (confirming) {
+                Text(
+                    if (firstOfTheDay) {
+                        "This bypasses the coach. The first override of the day is immediate; " +
+                            "your reason is recorded in the decision ledger."
+                    } else {
+                        "This is your ${ordinal(overridesToday + 1)} override today, so the wait " +
+                            "starts now: ${TimeFormatter.formatCountdown(cooldownSeconds)}. Come back " +
+                            "when it ends to take your 15 minutes. Your reason is recorded in the " +
+                            "decision ledger."
+                    },
+                )
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = onReasonChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Reason") },
+                    minLines = 2,
+                    maxLines = 4,
+                    isError = error != null,
+                )
+                error?.let { message ->
+                    Spacer(Modifier.height(6.dp))
                     Text(
-                        "This is your ${ordinal(overridesToday + 1)} override today. " +
-                            "The lock comes off for 15 minutes.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
                     )
-                    // Absent against a server that predates the cooldown, where
-                    // quoting a price of 0s would be worse than saying nothing.
-                    if (nextCooldownSeconds > 0) {
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            "Afterwards the next override waits " +
-                                "${TimeFormatter.formatCountdown(nextCooldownSeconds)} before it is available.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    // Shown back so the sentence going on the record is the one
-                    // that gets read at the moment of committing to it.
-                    Text(
-                        text = "On the record",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    ) {
-                        Text(
-                            text = reason.trim(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(10.dp),
-                        )
-                    }
-                } else {
-                    Text("This bypasses the coach. Your reason is recorded in the decision ledger.")
-                    Spacer(Modifier.height(16.dp))
-                    OutlinedTextField(
-                        value = reason,
-                        onValueChange = onReasonChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Reason") },
-                        minLines = 2,
-                        maxLines = 4,
-                        isError = error != null,
-                    )
-                    error?.let { message ->
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = message,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
                 }
             }
         },
         confirmButton = {
             TextButton(
                 enabled = reason.isNotBlank(),
-                onClick = if (confirming) onConfirm else onContinue,
-            ) { Text(if (confirming) "Take override" else "Continue") }
+                onClick = onConfirm,
+            ) { Text(if (firstOfTheDay) "Take override" else "Start the wait") }
         },
         dismissButton = {
-            TextButton(onClick = if (confirming) onBack else onDismiss) {
-                Text(if (confirming) "Back" else "Cancel")
-            }
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         },
     )
 }
 
-// While a cooldown runs the override is off the table, so the wait is stated
-// plainly rather than hidden behind a disabled menu item — with the one door
-// that is still open next to it.
+// While a request is live the wait is stated plainly rather than hidden behind
+// a disabled menu item — with the door still open next to it: the peek while
+// cooling, the claim while ready.
 @Composable
-private fun CooldownBanner(
-    remaining: Int,
+private fun OverrideBanner(
+    phase: OverridePhase,
+    cooldownRemaining: Int,
+    redeemRemaining: Int,
     overridesToday: Int,
-    shortUnblocksLeft: Int,
-    refusal: String?,
-    onShortUnblock: () -> Unit,
-    onDismissRefusal: () -> Unit,
+    onPeek: () -> Unit,
+    onRedeem: () -> Unit,
 ) {
+    val ready = phase == OverridePhase.READY
+    val tint = if (ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+
     Surface(
-        color = MaterialTheme.colorScheme.error.copy(alpha = 0.10f),
+        color = tint.copy(alpha = 0.10f),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Override on cooldown · ${TimeFormatter.formatCountdown(remaining)}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text =
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text =
+                        if (ready) {
+                            "Override ready · ${TimeFormatter.formatCountdown(redeemRemaining)} to take it"
+                        } else {
+                            "Override in ${TimeFormatter.formatCountdown(cooldownRemaining)}"
+                        },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = tint,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text =
+                        if (ready) {
+                            "Unclaimed, it evaporates — no penalty, same wait next time."
+                        } else {
                             "$overridesToday ${if (overridesToday == 1) "override" else "overrides"} today. " +
-                                if (shortUnblocksLeft > 0) {
-                                    "$shortUnblocksLeft × 30s left."
-                                } else {
-                                    "No 30s unblocks left."
-                                },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
-                Button(
-                    onClick = onShortUnblock,
-                    enabled = shortUnblocksLeft > 0,
-                    colors =
-                        ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            contentColor = MaterialTheme.colorScheme.onSurface,
-                        ),
-                ) { Text("Unblock 30s", style = MaterialTheme.typography.labelMedium) }
+                                "A 30s peek is one tap away."
+                        },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-
-            // Only appears when the server disagreed with the phone's copy of the
-            // countdown, which the poll interval makes possible.
-            refusal?.let { message ->
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = onDismissRefusal) { Text("OK") }
-                }
-            }
+            Spacer(Modifier.width(12.dp))
+            Button(
+                onClick = if (ready) onRedeem else onPeek,
+                colors =
+                    ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                    ),
+            ) { Text(if (ready) "Take 15 min" else "Peek 30s", style = MaterialTheme.typography.labelMedium) }
         }
     }
 }
