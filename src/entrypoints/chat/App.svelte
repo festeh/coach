@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import { SendHorizontal, RefreshCw, ShieldOff, Trash2 } from 'lucide-svelte';
+	import { SendHorizontal, RefreshCw, ShieldOff, Trash2, Eye } from 'lucide-svelte';
 	import { CoachState } from '../../lib/coachState.svelte';
+	import { OverridePhase } from '../../lib/background/types';
 	import { ChatClient } from '../../lib/chat/client.svelte';
 	import { chatWsUrl } from '../../lib/chat/protocol';
 	import { getOrCreateThreadId } from '../../lib/chat/thread';
-	import { formatTime } from '../../lib/format';
+	import { formatCountdown, formatTime } from '../../lib/format';
 
 	const agentsUrl = import.meta.env.VITE_AGENTS as string;
 	const coachToken = (import.meta.env.VITE_COACH_TOKEN as string | undefined) ?? '';
@@ -16,6 +17,12 @@
 	let client = $state<ChatClient | null>(null);
 	let draft = $state('');
 	let scroller = $state<HTMLElement | null>(null);
+
+	const phase = $derived(coach.livePhase);
+	// Cooling waits; idle needs the reason typed; ready takes a bare click.
+	const overrideDisabled = $derived(
+		phase === OverridePhase.Cooling || (phase === OverridePhase.Idle && !draft.trim())
+	);
 
 	onMount(async () => {
 		const threadId = await getOrCreateThreadId();
@@ -33,6 +40,18 @@
 		if (el) requestAnimationFrame(() => el.scrollTo({ top: el.scrollHeight }));
 	});
 
+	// The wall came down: go back to the page whose blocking brought us here.
+	// Focus gates this too — a release granted mid-focus (impossible now, but
+	// stale frames exist) must not navigate into a still-blocked page.
+	let wasBlocked = true;
+	$effect(() => {
+		const open = !coach.focus && coach.agentReleaseTimeLeft !== null;
+		if (open && wasBlocked && blockedHost) {
+			location.href = `https://${blockedHost}`;
+		}
+		wasBlocked = !open;
+	});
+
 	function submit(event: Event): void {
 		event.preventDefault();
 		if (!client) return;
@@ -40,18 +59,39 @@
 		draft = '';
 	}
 
-	// The escape hatch: 15 fixed minutes, priced at a written reason. Rides
-	// the background's coach socket, so it works even if the agent chat is
-	// down — the coach is bypassed, not consulted.
+	// One button, whatever the phase; the server decides what the click means.
+	// The first click of the day grants outright, later ones arm a countdown
+	// (the typed message is the recorded reason either way), and a click on a
+	// ripe request redeems it bare. Rides the background's coach socket, so it
+	// works even if the agent chat is down — the coach is bypassed, not consulted.
 	function override(): void {
 		const reason = draft.trim();
-		if (!reason || !client) return;
-		browser.runtime.sendMessage({ type: 'override', message: reason });
-		client.messages = [
-			...client.messages,
-			{ role: 'notice', content: `Override taken — 15 minutes. Reason: ${reason}` }
-		];
-		draft = '';
+		if (phase === OverridePhase.Idle) {
+			if (!reason) return;
+			browser.runtime.sendMessage({ type: 'override', message: reason });
+			draft = '';
+			return;
+		}
+		browser.runtime.sendMessage({ type: 'override', message: '' });
+	}
+
+	// The peek: 30 seconds, no reason asked, never refused. The nag of coming
+	// back every half-minute is the only price.
+	function peek(): void {
+		browser.runtime.sendMessage({ type: 'short_unblock' });
+	}
+
+	function overrideTitle(): string {
+		if (phase === OverridePhase.Ready) {
+			return `Take your 15 minutes — ${formatCountdown(coach.liveRedeemRemaining)} left to claim.`;
+		}
+		if (phase === OverridePhase.Cooling) {
+			return `Waiting — ${formatCountdown(coach.liveCooldownRemaining)} until the override is yours.`;
+		}
+		if (coach.override.overrides_today === 0) {
+			return 'Override: take 15 minutes. Your typed message becomes the recorded reason.';
+		}
+		return `Request override: starts a ${formatTime(coach.override.override_cooldown_seconds)} wait, then come back to take it. Your typed message becomes the recorded reason.`;
 	}
 
 	function lockLine(): string {
@@ -95,7 +135,7 @@
 			style:color="var(--color-ink-muted)"
 		>
 			Blocked: <span style:color="var(--color-bad)">{blockedHost}</span> — state your case, or
-			type a reason and take the override.
+			type a reason and request the override.
 		</div>
 	{/if}
 
@@ -161,6 +201,26 @@
 		{/if}
 	</section>
 
+	{#if phase !== OverridePhase.Idle || coach.focus}
+		<div
+			class="shrink-0 px-4 py-2 text-xs text-center border-t"
+			style:border-color="var(--color-line)"
+			style:background-color="var(--color-surface-2)"
+			style:color={phase === OverridePhase.Ready
+				? 'var(--color-accent-strong)'
+				: 'var(--color-ink-muted)'}
+		>
+			{#if phase === OverridePhase.Cooling}
+				Override in {formatCountdown(coach.liveCooldownRemaining)} — come back for it.
+			{:else if phase === OverridePhase.Ready}
+				Override ready — {formatCountdown(coach.liveRedeemRemaining)} left to take it.
+			{/if}
+			{#if coach.focus}
+				Focus session running — any release ends it.
+			{/if}
+		</div>
+	{/if}
+
 	<form
 		class="shrink-0 flex items-center gap-2 px-4 py-3 border-t"
 		style:border-color="var(--color-line)"
@@ -188,11 +248,24 @@
 			type="button"
 			class="p-2.5 rounded-xl transition-colors disabled:opacity-40"
 			style:background-color="var(--color-surface-2)"
+			style:color="var(--color-ink-muted)"
+			onclick={peek}
+			title="Peek: 30 seconds, no reason asked."
+			aria-label="Peek — 30 seconds"
+		>
+			<Eye size={16} />
+		</button>
+		<button
+			type="button"
+			class="p-2.5 rounded-xl transition-colors disabled:opacity-40"
+			style:background-color={phase === OverridePhase.Ready
+				? 'var(--color-accent-soft)'
+				: 'var(--color-surface-2)'}
 			style:color="var(--color-bad)"
-			disabled={!draft.trim()}
+			disabled={overrideDisabled}
 			onclick={override}
-			title="Override: take 15 minutes. Your typed message becomes the recorded reason."
-			aria-label="Override — 15 minutes"
+			title={overrideTitle()}
+			aria-label="Override"
 		>
 			<ShieldOff size={16} />
 		</button>
