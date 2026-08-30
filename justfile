@@ -2,7 +2,17 @@ set dotenv-load
 
 default: run
 
-gradle := "JAVA_HOME=/opt/android-studio/jbr WEBSOCKET_URL=${WEBSOCKET_URL:-} AGENTS_URL=${AGENTS_URL:-} COACH_API_TOKEN=${COACH_API_TOKEN:-} ./android/gradlew -p android"
+home := env('HOME')
+pcloud := home / 'pCloudDrive'
+apk_dir := env('COACH_APK_DIR', pcloud / 'Personal/AndroidApps/coach')
+
+# A stable LTS the whole toolchain supports (Gradle 8.10 / AGP 8.8 / Kotlin
+# 2.1), not the Android Studio JBR: that one trails the IDE package — it
+# jumped to Java 25, which this Kotlin's version parser refuses to accept —
+# and Arch's /usr/lib/jvm/default (26) is no better.
+java_home := env('COACH_JAVA_HOME', home / '.local/share/mise/installs/java/temurin-21')
+
+gradle := "JAVA_HOME=" + java_home + " WEBSOCKET_URL=${WEBSOCKET_URL:-} AGENTS_URL=${AGENTS_URL:-} COACH_API_TOKEN=${COACH_API_TOKEN:-} ./android/gradlew -p android"
 
 run:
     {{gradle}} :app:assembleDebug
@@ -15,5 +25,27 @@ install-release:
     {{gradle}} :app:assembleRelease
     adb install -r $(find build/app/outputs -name "*release*.apk" | head -1)
 
-deploy: build-release
-    cp $(find build/app/outputs -name "*release*.apk" | head -1) ~/pCloudDrive/android-apps/coach/
+# Build the release APK into pCloud, to install from the phone (no cable).
+apk:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # pCloud is a FUSE mount, and with the client stopped its mount point is an
+    # ordinary empty directory that mkdir -p below would happily populate. The
+    # copy would land on local disk, never sync, and the phone would reinstall
+    # the previous build none the wiser. Only worth asserting when the
+    # destination is actually in pCloud; COACH_APK_DIR may point anywhere.
+    case {{apk_dir}} in
+        {{pcloud}}/*)
+            if ! mountpoint -q {{pcloud}}; then
+                echo "pCloud is not mounted at {{pcloud}} — is the client running?" >&2
+                exit 1
+            fi
+            ;;
+    esac
+    # Release, not debug: a debug APK ships debuggable, is signed with the
+    # shared Android debug key, and carries the Compose tooling this build
+    # leaves out.
+    {{gradle}} :app:assembleRelease
+    mkdir -p {{apk_dir}}
+    cp build/app/outputs/apk/release/app-release.apk {{apk_dir}}/coach.apk
+    echo "wrote {{apk_dir}}/coach.apk ($(du -h {{apk_dir}}/coach.apk | cut -f1))"
