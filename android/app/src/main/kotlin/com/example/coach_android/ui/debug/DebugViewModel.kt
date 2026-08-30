@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.AndroidViewModel
 import com.example.coach_android.FocusMonitorService
 import com.example.coach_android.util.Permissions
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 data class DebugUiState(
     val hasUsageStats: Boolean = false,
+    val hasNotifications: Boolean = false,
     val hasOverlay: Boolean = false,
     val hasBatteryExclusion: Boolean = false,
     val isServiceRunning: Boolean = false,
@@ -34,6 +36,10 @@ class DebugViewModel(
         _state.value =
             DebugUiState(
                 hasUsageStats = Permissions.hasUsageStats(app),
+                // The lived truth, not the raw permission: this also reads false
+                // when notifications are blocked for the app in Settings, which
+                // mutes the service notification just the same.
+                hasNotifications = NotificationManagerCompat.from(app).areNotificationsEnabled(),
                 hasOverlay = Settings.canDrawOverlays(app),
                 hasBatteryExclusion = checkBatteryExclusion(app),
                 isServiceRunning = service != null,
@@ -44,6 +50,16 @@ class DebugViewModel(
     private fun checkBatteryExclusion(context: Context): Boolean {
         val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return false
         return pm.isIgnoringBatteryOptimizations(context.packageName)
+    }
+
+    fun requestNotifications() {
+        val app = getApplication<Application>()
+        val intent =
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, app.packageName)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        app.startActivity(intent)
     }
 
     fun requestUsageStats() {

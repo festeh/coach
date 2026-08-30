@@ -46,6 +46,9 @@ fun DebugScreen(
             PermissionRow("Usage Stats", state.hasUsageStats, viewModel::requestUsageStats)
         }
         item {
+            PermissionRow("Notifications", state.hasNotifications, viewModel::requestNotifications)
+        }
+        item {
             PermissionRow("Overlay", state.hasOverlay, viewModel::requestOverlay)
         }
         item {
