@@ -175,6 +175,18 @@ func (m *Manager) AddFocusRecord(startedAt time.Time, durationSeconds int) error
 	return err
 }
 
+// DeleteFocusRecord removes the session that started at startedAt — one that
+// was aborted before its (stacked) start ever arrived.
+func (m *Manager) DeleteFocusRecord(startedAt time.Time) error {
+	ctx, cancel := operationContext()
+	defer cancel()
+
+	_, err := m.pool.Exec(ctx, `
+		DELETE FROM focus_sessions WHERE started_at = $1
+	`, startedAt)
+	return err
+}
+
 // GetTodayFocusCount returns the number of sessions started today in the
 // server's configured local timezone.
 func (m *Manager) GetTodayFocusCount() (int, error) {

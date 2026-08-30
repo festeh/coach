@@ -8,251 +8,317 @@ import (
 )
 
 // ledgerAt builds a ledger as it would stand on now's day.
-func ledgerAt(now time.Time, overrides int, lastEnd time.Time, hatches int) overrideLedger {
+func ledgerAt(now time.Time, redeemed int, armedAt time.Time, reason string) overrideLedger {
 	return overrideLedger{
-		day:               db.LocalDayStart(now),
-		overrides:         overrides,
-		lastOverrideEnd:   lastEnd,
-		shortUnblocksUsed: hatches,
+		day:         db.LocalDayStart(now),
+		redeemed:    redeemed,
+		armedAt:     armedAt,
+		armedReason: reason,
 	}
 }
 
 func TestFirstOverrideOfTheDayIsFree(t *testing.T) {
-	now := time.Now()
-
-	cooldown := computeCooldown(now, overrideLedger{}.onDay(now))
-
-	if cooldown.Active() {
-		t.Errorf("Fresh day should carry no cooldown, got %ds remaining", cooldown.RemainingSeconds)
-	}
-	if cooldown.CooldownSeconds != 0 {
-		t.Errorf("Fresh day should price the next override at 0s, got %ds", cooldown.CooldownSeconds)
-	}
-}
-
-func TestCooldownGrowsByThirtySecondsPerOverride(t *testing.T) {
-	now := time.Now()
-
-	for overrides, want := range map[int]int{1: 30, 2: 60, 3: 90, 10: 300} {
-		// Anchored in the future so the whole cooldown is still ahead.
-		ledger := ledgerAt(now, overrides, now, 0)
-		if got := computeCooldown(now, ledger).CooldownSeconds; got != want {
-			t.Errorf("After %d overrides, cooldown should be %ds, got %ds", overrides, want, got)
-		}
-	}
-}
-
-// The anchor is the whole point: measured from the tap, a 30s cooldown would
-// expire 870 seconds before the release it followed and would never refuse
-// anything.
-// The confirm dialog quotes this, and it is sent rather than derived so the phone
-// does not need its own copy of the step.
-func TestNextCooldownPricesOneMoreOverride(t *testing.T) {
-	now := time.Now()
-
-	if got := computeCooldown(now, overrideLedger{}.onDay(now)).NextCooldownSeconds; got != CooldownStepSeconds {
-		t.Errorf("With a free override available, the one after it should cost %ds, got %ds",
-			CooldownStepSeconds, got)
-	}
-	if got := computeCooldown(now, ledgerAt(now, 3, now, 0)).NextCooldownSeconds; got != 4*CooldownStepSeconds {
-		t.Errorf("After 3 overrides the next should cost %ds, got %ds", 4*CooldownStepSeconds, got)
-	}
-}
-
-func TestCooldownRunsFromLockReEngageNotFromTheTap(t *testing.T) {
-	now := time.Now()
-	takenAt := now.Add(-OverrideSeconds * time.Second / 2) // mid-release
-	releaseEnds := takenAt.Add(OverrideSeconds * time.Second)
-
-	cooldown := computeCooldown(now, ledgerAt(now, 1, releaseEnds, 0))
-
-	if !cooldown.Active() {
-		t.Fatal("Cooldown should still be pending while the release is running")
-	}
-	// Half the release remains, plus the full 30s cooldown after it.
-	wantAtLeast := OverrideSeconds/2 + CooldownStepSeconds - 1
-	if cooldown.RemainingSeconds < wantAtLeast {
-		t.Errorf("Remaining should span the rest of the release plus the cooldown, want >= %ds, got %ds",
-			wantAtLeast, cooldown.RemainingSeconds)
-	}
-}
-
-func TestCooldownClearsAfterItElapses(t *testing.T) {
-	now := time.Now()
-	// One override, its release lapsed a minute ago: 30s of cooldown has passed.
-	ledger := ledgerAt(now, 1, now.Add(-time.Minute), 0)
-
-	if cooldown := computeCooldown(now, ledger); cooldown.Active() {
-		t.Errorf("Cooldown should have elapsed, got %ds remaining", cooldown.RemainingSeconds)
-	}
-}
-
-func TestRemainingRoundsUpSoAnActiveCooldownNeverReadsZero(t *testing.T) {
-	now := time.Now()
-	// 500ms left: truncation would report 0 while an override is still refused.
-	ledger := ledgerAt(now, 1, now.Add(-CooldownStepSeconds*time.Second).Add(500*time.Millisecond), 0)
-
-	cooldown := computeCooldown(now, ledger)
-
-	if cooldown.RemainingSeconds != 1 {
-		t.Errorf("A cooldown with 500ms to run should read 1s, got %ds", cooldown.RemainingSeconds)
-	}
-	if !cooldown.Active() {
-		t.Error("Active() must agree with a non-zero remaining")
-	}
-}
-
-func TestEscalationResetsOnANewDay(t *testing.T) {
-	now := time.Now()
-	yesterday := now.AddDate(0, 0, -1)
-	stale := overrideLedger{
-		day:             db.LocalDayStart(yesterday),
-		overrides:       5,
-		lastOverrideEnd: yesterday,
-	}
-
-	cooldown := computeCooldown(now, stale.onDay(now))
-
-	if cooldown.OverridesToday != 0 {
-		t.Errorf("Yesterday's overrides should not count today, got %d", cooldown.OverridesToday)
-	}
-	if cooldown.Active() {
-		t.Error("A new day's first override should be free")
-	}
-}
-
-func TestShortUnblocksOnlyOfferedDuringACooldown(t *testing.T) {
-	now := time.Now()
-
-	clear := computeCooldown(now, overrideLedger{}.onDay(now))
-	if clear.ShortUnblocksLeft != 0 {
-		t.Errorf("No cooldown means no need for the hatch, got %d left", clear.ShortUnblocksLeft)
-	}
-
-	cooling := computeCooldown(now, ledgerAt(now, 1, now, 0))
-	if cooling.ShortUnblocksLeft != ShortUnblockLimit {
-		t.Errorf("A fresh cooldown window should offer %d hatches, got %d",
-			ShortUnblockLimit, cooling.ShortUnblocksLeft)
-	}
-}
-
-func TestShortUnblocksRunOutAtTheLimit(t *testing.T) {
-	now := time.Now()
-
-	spent := computeCooldown(now, ledgerAt(now, 1, now, ShortUnblockLimit))
-
-	if spent.ShortUnblocksLeft != 0 {
-		t.Errorf("Hatch should be exhausted at the limit, got %d left", spent.ShortUnblocksLeft)
-	}
-	if !spent.Active() {
-		t.Error("Exhausting the hatch must not end the cooldown")
-	}
-}
-
-func TestTakeOverrideRefusesWhileCoolingDown(t *testing.T) {
 	state := &State{}
 
-	if _, taken := state.TakeOverride(); !taken {
-		t.Fatal("First override of the day should be free")
+	status, outcome, reason := state.TakeOverride("one thing to check")
+
+	if outcome != OverrideGranted {
+		t.Fatalf("First override of the day should be granted outright, got outcome %v", outcome)
 	}
 	if agentLocked(state) {
-		t.Error("A taken override should release the lock")
+		t.Error("A granted override should release the lock")
 	}
-
-	// The second is refused: the first one's release has not even lapsed yet.
-	cooldown, taken := state.TakeOverride()
-	if taken {
-		t.Error("Second override should be refused while the cooldown runs")
+	if reason != "one thing to check" {
+		t.Errorf("A free grant should journal the written reason, got %q", reason)
 	}
-	if !cooldown.Active() {
-		t.Error("A refusal should report what it is waiting for")
-	}
-	if cooldown.OverridesToday != 1 {
-		t.Errorf("Refused attempts must not count, got %d overrides today", cooldown.OverridesToday)
+	if status.OverridesToday != 1 {
+		t.Errorf("The free grant should count as redeemed, got %d today", status.OverridesToday)
 	}
 }
 
-func TestTakeShortUnblockOnlyWorksDuringACooldownAndIsCapped(t *testing.T) {
+func TestOverrideRequiresAReasonToGrantOrArm(t *testing.T) {
 	state := &State{}
 
-	// No cooldown yet, so the hatch is shut.
-	if _, taken := state.TakeShortUnblock(); taken {
-		t.Error("Hatch should be shut while no cooldown is running")
+	if _, outcome, _ := state.TakeOverride(""); outcome != OverrideNeedsReason {
+		t.Errorf("A bare click while idle should ask for a reason, got outcome %v", outcome)
 	}
+	if !agentLocked(state) {
+		t.Error("A refused click must not release anything")
+	}
+	if status := state.OverrideStatus(); status.OverridesToday != 0 {
+		t.Errorf("A refused click must not count, got %d today", status.OverridesToday)
+	}
+}
 
-	if _, taken := state.TakeOverride(); !taken {
+func TestSecondClickArmsACountdownInsteadOfGranting(t *testing.T) {
+	state := &State{}
+
+	if _, outcome, _ := state.TakeOverride("first"); outcome != OverrideGranted {
 		t.Fatal("First override should be free")
 	}
 
-	for i := 1; i <= ShortUnblockLimit; i++ {
-		if _, taken := state.TakeShortUnblock(); !taken {
-			t.Errorf("Hatch use %d of %d should be allowed", i, ShortUnblockLimit)
+	status, outcome, _ := state.TakeOverride("second")
+
+	if outcome != OverrideArmed {
+		t.Fatalf("Second click of the day should arm, got outcome %v", outcome)
+	}
+	if status.Phase != OverridePhaseCooling {
+		t.Errorf("An armed request should read as cooling, got %q", status.Phase)
+	}
+	if status.CooldownSeconds != CooldownStepSeconds {
+		t.Errorf("The second override should cost %ds, got %ds", CooldownStepSeconds, status.CooldownSeconds)
+	}
+	if status.CooldownRemaining <= 0 || status.CooldownRemaining > CooldownStepSeconds {
+		t.Errorf("A fresh countdown should have its whole length ahead, got %ds", status.CooldownRemaining)
+	}
+}
+
+func TestClickDuringTheCountdownChangesNothing(t *testing.T) {
+	state := &State{}
+	state.TakeOverride("first")
+	state.TakeOverride("second")
+
+	status, outcome, _ := state.TakeOverride("impatient")
+
+	if outcome != OverrideCooling {
+		t.Fatalf("A click mid-countdown should be a no-op, got outcome %v", outcome)
+	}
+	if status.Phase != OverridePhaseCooling {
+		t.Errorf("The countdown should still be running, got %q", status.Phase)
+	}
+	if status.OverridesToday != 1 {
+		t.Errorf("An impatient click must not count, got %d today", status.OverridesToday)
+	}
+}
+
+func TestCountdownGrowsByThirtySecondsPerRedemption(t *testing.T) {
+	now := time.Now()
+
+	for redeemed, want := range map[int]int{1: 30, 2: 60, 3: 90, 10: 300} {
+		status := overrideStatus(now, ledgerAt(now, redeemed, time.Time{}, ""))
+		if status.CooldownSeconds != want {
+			t.Errorf("After %d redemptions, arming should cost %ds, got %ds", redeemed, want, status.CooldownSeconds)
+		}
+		if status.NextCooldownSeconds != want+CooldownStepSeconds {
+			t.Errorf("After %d redemptions, one more should cost %ds, got %ds",
+				redeemed, want+CooldownStepSeconds, status.NextCooldownSeconds)
 		}
 	}
-	if cooldown, taken := state.TakeShortUnblock(); taken {
-		t.Errorf("Hatch should be exhausted after %d uses, %d reported left",
-			ShortUnblockLimit, cooldown.ShortUnblocksLeft)
+}
+
+func TestRipeRequestRedeemsWithoutRetypingTheReason(t *testing.T) {
+	state := &State{}
+	armedAt := time.Now().Add(-time.Duration(CooldownStepSeconds+1) * time.Second)
+	state.RestoreOverrideLedger(1, &armedAt, "finish the thread")
+
+	if status := state.OverrideStatus(); status.Phase != OverridePhaseReady {
+		t.Fatalf("A lapsed countdown should read as ready, got %q", status.Phase)
 	}
 
-	// Free by design: the hatch must not have lengthened the cooldown.
-	if got := state.OverrideCooldown().CooldownSeconds; got != CooldownStepSeconds {
-		t.Errorf("Hatch uses must not escalate the cooldown, want %ds got %ds",
-			CooldownStepSeconds, got)
+	status, outcome, reason := state.TakeOverride("")
+
+	if outcome != OverrideGranted {
+		t.Fatalf("A click on a ripe request should redeem, got outcome %v", outcome)
+	}
+	if agentLocked(state) {
+		t.Error("A redemption should release the lock")
+	}
+	if reason != "finish the thread" {
+		t.Errorf("The redemption should journal the reason written at arming, got %q", reason)
+	}
+	if status.OverridesToday != 2 {
+		t.Errorf("The redemption should count, got %d today", status.OverridesToday)
+	}
+	if status.Phase != OverridePhaseIdle {
+		t.Errorf("A redeemed request should leave no live request behind, got %q", status.Phase)
 	}
 }
 
-func TestTakeOverrideAllowedOnceTheCooldownElapses(t *testing.T) {
-	state := &State{}
+func TestRipeWindowClosesAndTheRequestEvaporates(t *testing.T) {
+	now := time.Now()
+	expired := now.Add(-time.Duration(CooldownStepSeconds+RedeemWindowSeconds+1) * time.Second)
 
-	// One override already taken, its release and cooldown both long past.
-	past := time.Now().Add(-time.Hour)
-	state.RestoreOverrideLedger(1, &past, 0)
+	ledger := ledgerAt(now, 1, expired, "stale").at(now)
+	status := overrideStatus(now, ledger)
 
-	if cooldown := state.OverrideCooldown(); cooldown.Active() {
-		t.Fatalf("An hour-old cooldown should be clear, got %ds", cooldown.RemainingSeconds)
+	if status.Phase != OverridePhaseIdle {
+		t.Fatalf("An unclaimed request should evaporate, got %q", status.Phase)
 	}
-	cooldown, taken := state.TakeOverride()
-	if !taken {
-		t.Error("Override should be allowed once the cooldown has elapsed")
+	// No penalty: the next click re-arms at the same price it was.
+	if status.OverridesToday != 1 {
+		t.Errorf("Abandoning a request must not count as a redemption, got %d", status.OverridesToday)
 	}
-	if cooldown.OverridesToday != 2 {
-		t.Errorf("Should now be 2 overrides today, got %d", cooldown.OverridesToday)
-	}
-	if cooldown.CooldownSeconds != 2*CooldownStepSeconds {
-		t.Errorf("Next cooldown should be %ds, got %ds", 2*CooldownStepSeconds, cooldown.CooldownSeconds)
+	if status.CooldownSeconds != CooldownStepSeconds {
+		t.Errorf("Abandoning a request must not change the price, want %ds got %ds",
+			CooldownStepSeconds, status.CooldownSeconds)
 	}
 }
 
-func TestRestoreOverrideLedgerKeepsHatchesSpent(t *testing.T) {
-	state := &State{}
-	end := time.Now().Add(time.Minute) // release still running, so cooldown pending
+func TestRedeemWindowCountsDownFromWhereTheCooldownEnded(t *testing.T) {
+	now := time.Now()
+	// Armed 40s ago at a 30s price: ripe for 10s, so ~110s of the window left.
+	armedAt := now.Add(-40 * time.Second)
 
-	state.RestoreOverrideLedger(2, &end, 1)
+	status := overrideStatus(now, ledgerAt(now, 1, armedAt, "r"))
 
-	cooldown := state.OverrideCooldown()
-	if cooldown.OverridesToday != 2 {
-		t.Errorf("Restored override count should be 2, got %d", cooldown.OverridesToday)
+	if status.Phase != OverridePhaseReady {
+		t.Fatalf("Expected ready, got %q", status.Phase)
 	}
-	if !cooldown.Active() {
-		t.Error("Restored ledger should still be cooling down")
-	}
-	if want := ShortUnblockLimit - 1; cooldown.ShortUnblocksLeft != want {
-		t.Errorf("A restart must not hand back spent hatches, want %d left got %d",
-			want, cooldown.ShortUnblocksLeft)
+	if status.RedeemRemaining < RedeemWindowSeconds-11 || status.RedeemRemaining > RedeemWindowSeconds-10 {
+		t.Errorf("Redeem window should have ~%ds left, got %ds", RedeemWindowSeconds-10, status.RedeemRemaining)
 	}
 }
 
-func TestRecordOverrideBillsTheHTTPRoad(t *testing.T) {
+func TestCountdownRoundsUpSoCoolingNeverReadsZero(t *testing.T) {
+	now := time.Now()
+	// 500ms of countdown left: truncation would read 0 while a click still arms nothing.
+	armedAt := now.Add(-time.Duration(CooldownStepSeconds)*time.Second + 500*time.Millisecond)
+
+	status := overrideStatus(now, ledgerAt(now, 1, armedAt, "r"))
+
+	if status.Phase != OverridePhaseCooling {
+		t.Fatalf("Half a second to run should still be cooling, got %q", status.Phase)
+	}
+	if status.CooldownRemaining != 1 {
+		t.Errorf("A countdown with 500ms to run should read 1s, got %ds", status.CooldownRemaining)
+	}
+}
+
+func TestEscalationAndLiveRequestsResetOnANewDay(t *testing.T) {
+	now := time.Now()
+	yesterday := now.AddDate(0, 0, -1)
+	stale := overrideLedger{
+		day:         db.LocalDayStart(yesterday),
+		redeemed:    5,
+		armedAt:     yesterday,
+		armedReason: "yesterday's craving",
+	}
+
+	status := overrideStatus(now, stale.at(now))
+
+	if status.OverridesToday != 0 {
+		t.Errorf("Yesterday's redemptions should not count today, got %d", status.OverridesToday)
+	}
+	if status.Phase != OverridePhaseIdle {
+		t.Errorf("Yesterday's request should not survive midnight, got %q", status.Phase)
+	}
+	if status.CooldownSeconds != 0 {
+		t.Errorf("A new day's first override should be free, got %ds", status.CooldownSeconds)
+	}
+}
+
+func TestShortUnblockAlwaysGrantsAndNeverEscalates(t *testing.T) {
 	state := &State{}
 
-	state.RecordOverride(OverrideSeconds * time.Second)
-
-	cooldown := state.OverrideCooldown()
-	if cooldown.OverridesToday != 1 {
-		t.Errorf("HTTP override should count toward the day, got %d", cooldown.OverridesToday)
+	for i := range 3 {
+		state.TakeShortUnblock()
+		if agentLocked(state) {
+			t.Fatalf("Peek %d should have released the lock", i+1)
+		}
 	}
-	// And it now prices the next WebSocket override.
-	if _, taken := state.TakeOverride(); taken {
-		t.Error("An HTTP override should put the WebSocket road on cooldown too")
+
+	status := state.OverrideStatus()
+	if status.OverridesToday != 0 {
+		t.Errorf("Peeks must not count as overrides, got %d today", status.OverridesToday)
+	}
+	if status.CooldownSeconds != 0 {
+		t.Errorf("Peeks must not price the next override, got %ds", status.CooldownSeconds)
+	}
+}
+
+func TestShortUnblockLeavesTheCountdownRunning(t *testing.T) {
+	state := &State{}
+	armedAt := time.Now().Add(-5 * time.Second)
+	state.RestoreOverrideLedger(1, &armedAt, "waiting it out")
+
+	status := state.TakeShortUnblock()
+
+	if agentLocked(state) {
+		t.Error("The peek should have released the lock")
+	}
+	if status.Phase != OverridePhaseCooling {
+		t.Errorf("A peek must not touch the armed request, got %q", status.Phase)
+	}
+	if status.OverridesToday != 1 {
+		t.Errorf("A peek must not count as a redemption, got %d", status.OverridesToday)
+	}
+}
+
+func TestRecordOverrideBillsTheHTTPRoadAndClearsTheArm(t *testing.T) {
+	state := &State{}
+	armedAt := time.Now()
+	state.RestoreOverrideLedger(1, &armedAt, "pending")
+
+	state.RecordOverride()
+
+	status := state.OverrideStatus()
+	if status.OverridesToday != 2 {
+		t.Errorf("HTTP override should count toward the day, got %d", status.OverridesToday)
+	}
+	if status.Phase != OverridePhaseIdle {
+		t.Errorf("The agent's grant should retire the pending request, got %q", status.Phase)
+	}
+	// And it prices the next WebSocket click, which now arms rather than grants.
+	if _, outcome, _ := state.TakeOverride("more"); outcome != OverrideArmed {
+		t.Errorf("After an HTTP override the next click should arm, got outcome %v", outcome)
+	}
+}
+
+func TestRestoreOverrideLedgerRevivesARunningCountdown(t *testing.T) {
+	state := &State{}
+	armedAt := time.Now().Add(-10 * time.Second)
+
+	state.RestoreOverrideLedger(2, &armedAt, "survived the restart")
+
+	status := state.OverrideStatus()
+	if status.OverridesToday != 2 {
+		t.Errorf("Restored redemption count should be 2, got %d", status.OverridesToday)
+	}
+	if status.Phase != OverridePhaseCooling {
+		t.Fatalf("A restart must not skip the countdown, got %q", status.Phase)
+	}
+	if want := 2*CooldownStepSeconds - 10; status.CooldownRemaining < want-1 || status.CooldownRemaining > want {
+		t.Errorf("Countdown should pick up where it was, want ~%ds got %ds", want, status.CooldownRemaining)
+	}
+}
+
+func TestGrantedReleaseEndsARunningFocusSession(t *testing.T) {
+	state := &State{}
+	state.SetFocusing(5 * time.Minute)
+
+	if _, outcome, _ := state.TakeOverride("released means released"); outcome != OverrideGranted {
+		t.Fatal("First override of the day should be granted")
+	}
+
+	if isBlocked(state) {
+		t.Error("A granted override should end the focus session and unblock")
+	}
+	if state.GetCurrentFocusInfo().Focusing {
+		t.Error("The focus session should be over")
+	}
+}
+
+func TestPeekEndsARunningFocusSessionToo(t *testing.T) {
+	state := &State{}
+	state.SetFocusing(5 * time.Minute)
+
+	state.TakeShortUnblock()
+
+	if isBlocked(state) {
+		t.Error("A granted peek should end the focus session and unblock")
+	}
+}
+
+func TestArmingDoesNotTouchAFocusSession(t *testing.T) {
+	state := &State{}
+	state.RestoreOverrideLedger(1, nil, "")
+	state.SetFocusing(5 * time.Minute)
+
+	if _, outcome, _ := state.TakeOverride("still cooling"); outcome != OverrideArmed {
+		t.Fatal("Expected the click to arm")
+	}
+
+	if !state.GetCurrentFocusInfo().Focusing {
+		t.Error("Arming grants nothing, so the focus session must survive it")
 	}
 }

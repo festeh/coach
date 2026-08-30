@@ -1,6 +1,27 @@
 package db
 
-import "time"
+import (
+	"errors"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+)
+
+// The journal's decision kinds. One vocabulary, shared by writers and queries.
+const (
+	// DecisionGrant is a release the agent granted after a conversation.
+	DecisionGrant = "grant"
+	// DecisionOverride is a redeemed (or agent-billed) override: 15 minutes taken.
+	DecisionOverride = "override"
+	// DecisionOverrideArmed is click one: a request that started its countdown.
+	// Journalled with its reason even if never redeemed, so abandoned cravings
+	// still tell their story.
+	DecisionOverrideArmed = "override_armed"
+	// DecisionShortUnblock is a 30-second peek.
+	DecisionShortUnblock = "short_unblock"
+	// DecisionDenial is a release the agent refused.
+	DecisionDenial = "denial"
+)
 
 // LockDecision is one persisted agent-lock decision.
 type LockDecision struct {
@@ -38,40 +59,51 @@ func (m *Manager) InsertLockDecision(kind, source, userMessage, agentMessage str
 	return err
 }
 
-// TodayOverrides returns how many overrides were taken today and when the last
-// one's release lapses (created_at + its duration). Both are what the cooldown
-// is priced from, so a restart doesn't hand back a free override.
-func (m *Manager) TodayOverrides() (int, *time.Time, error) {
+// TodayOverrideCount returns how many overrides were redeemed today, which is
+// what the escalation is priced from, so a restart doesn't hand back a free
+// override.
+func (m *Manager) TodayOverrideCount() (int, error) {
 	start, end := localDayBounds(time.Now())
-	ctx, cancel := operationContext()
-	defer cancel()
-
-	var count int
-	var lastEnd *time.Time
-	err := m.pool.QueryRow(ctx, `
-		SELECT count(*), max(created_at + make_interval(secs => duration_seconds))
-		FROM lock_decisions
-		WHERE kind = 'override'
-		AND created_at >= $1 AND created_at < $2
-	`, start, end).Scan(&count, &lastEnd)
-	if err != nil {
-		return 0, nil, err
-	}
-	return count, lastEnd, nil
-}
-
-// CountShortUnblocksSince counts escape-hatch uses since t, which is how the
-// per-cooldown-window cap survives a restart.
-func (m *Manager) CountShortUnblocksSince(since time.Time) (int, error) {
 	ctx, cancel := operationContext()
 	defer cancel()
 
 	var count int
 	err := m.pool.QueryRow(ctx, `
 		SELECT count(*) FROM lock_decisions
-		WHERE kind = 'short_unblock' AND created_at >= $1
-	`, since).Scan(&count)
+		WHERE kind = $1
+		AND created_at >= $2 AND created_at < $3
+	`, DecisionOverride, start, end).Scan(&count)
 	return count, err
+}
+
+// LatestArmedRequest returns today's newest armed override request that no
+// redemption has answered yet — nil when there is none. This is how a running
+// countdown survives a restart instead of handing the wait back.
+func (m *Manager) LatestArmedRequest() (*time.Time, string, error) {
+	start, end := localDayBounds(time.Now())
+	ctx, cancel := operationContext()
+	defer cancel()
+
+	var armedAt time.Time
+	var reason string
+	err := m.pool.QueryRow(ctx, `
+		SELECT created_at, user_message
+		FROM lock_decisions
+		WHERE kind = $1 AND created_at >= $2 AND created_at < $3
+		AND created_at > COALESCE((
+			SELECT max(created_at) FROM lock_decisions
+			WHERE kind = $4 AND created_at >= $2 AND created_at < $3
+		), to_timestamp(0))
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, DecisionOverrideArmed, start, end, DecisionOverride).Scan(&armedAt, &reason)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, "", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return &armedAt, reason, nil
 }
 
 // GetTodayLockDecisions returns today's decisions oldest first, using the
@@ -132,9 +164,9 @@ func (m *Manager) GetUnlockStats(days int) ([]UnlockDay, error) {
 		SELECT created_at, duration_seconds
 		FROM lock_decisions
 		WHERE created_at >= $1 AND created_at < $2
-		AND kind IN ('grant', 'override', 'short_unblock')
+		AND kind = ANY($3)
 		ORDER BY created_at
-	`, start, end)
+	`, start, end, []string{DecisionGrant, DecisionOverride, DecisionShortUnblock})
 	if err != nil {
 		return nil, err
 	}

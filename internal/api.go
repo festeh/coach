@@ -7,10 +7,23 @@ import (
 	"strconv"
 	"time"
 
+	"coach/internal/db"
 	"coach/internal/stats"
 
 	"github.com/charmbracelet/log"
 	"github.com/gorilla/websocket"
+)
+
+// The message types the control WebSocket accepts, one vocabulary for the
+// switch below and for anyone reading what the clients may say.
+const (
+	wsGetFocusing  = "get_focusing"
+	wsFocus        = "focus"
+	wsAttention    = "attention"
+	wsTemptation   = "temptation"
+	wsOverride     = "override"
+	wsShortUnblock = "short_unblock"
+	wsPing         = "ping"
 )
 
 // writeJSON marshals data to JSON and writes it to the response with proper headers
@@ -146,13 +159,13 @@ func (s *Server) AgentLockHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Journal the decision. The override flag lives only on the wire; the
 		// stored kind carries it.
-		kind := "grant"
+		kind := db.DecisionGrant
 		if r.FormValue("is_override") == "true" {
-			kind = "override"
+			kind = db.DecisionOverride
 			// Counts toward the day's escalation like a WebSocket override would.
-			// This road does not enforce the cooldown: it belongs to the agent,
-			// whose authority over the lock is not the user's budget.
-			s.State.RecordOverride(time.Duration(duration) * time.Second)
+			// This road does not arm or wait: it belongs to the agent, whose
+			// authority over the lock is not the user's budget.
+			s.State.RecordOverride()
 		}
 		s.logLockDecision(kind, r.FormValue("user_message"), r.FormValue("agent_message"), duration)
 
@@ -191,34 +204,6 @@ func (s *Server) logLockDecision(kind, userMessage, agentMessage string, duratio
 	}()
 }
 
-// refuseUnblock tells one client its unblock was declined and what it is waiting
-// for. The lock state has not changed, so there is nothing to broadcast.
-func (s *Server) refuseUnblock(conn *websocket.Conn, request string, cooldown OverrideCooldown) {
-	log.Info("Unblock refused",
-		"request", request,
-		"cooldown_remaining", cooldown.RemainingSeconds,
-		"short_unblocks_left", cooldown.ShortUnblocksLeft)
-
-	refusal := struct {
-		Type              string `json:"type"`
-		Request           string `json:"request"`
-		OverridesToday    int    `json:"overrides_today"`
-		CooldownSeconds   int    `json:"override_cooldown_seconds"`
-		CooldownRemaining int    `json:"override_cooldown_remaining"`
-		ShortUnblocksLeft int    `json:"short_unblocks_left"`
-	}{
-		Type:              "unblock_refused",
-		Request:           request,
-		OverridesToday:    cooldown.OverridesToday,
-		CooldownSeconds:   cooldown.CooldownSeconds,
-		CooldownRemaining: cooldown.RemainingSeconds,
-		ShortUnblocksLeft: cooldown.ShortUnblocksLeft,
-	}
-	if err := s.State.NotifySingleClient(conn, refusal); err != nil {
-		log.Error("Failed to send unblock refusal", "err", err)
-	}
-}
-
 // logTemptation records one blocked attempt, best-effort and asynchronous. A
 // failure (or a missing DB in tests) loses the row, never anything else.
 func (s *Server) logTemptation(source, target string) {
@@ -243,12 +228,12 @@ func (s *Server) writeLockState(w http.ResponseWriter) {
 		DurationSeconds int    `json:"duration_seconds"`
 	}
 	out := struct {
-		ReleasedSecondsToday int              `json:"released_seconds_today"`
-		OverrideCountToday   int              `json:"override_count_today"`
-		TemptationCountToday int              `json:"temptation_count_today"`
-		Cooldown             OverrideCooldown `json:"cooldown"`
-		Recent               []recentEntry    `json:"recent"`
-	}{Cooldown: s.State.OverrideCooldown(), Recent: []recentEntry{}}
+		ReleasedSecondsToday int            `json:"released_seconds_today"`
+		OverrideCountToday   int            `json:"override_count_today"`
+		TemptationCountToday int            `json:"temptation_count_today"`
+		Override             OverrideStatus `json:"override"`
+		Recent               []recentEntry  `json:"recent"`
+	}{Override: s.State.OverrideStatus(), Recent: []recentEntry{}}
 
 	if s.DBManager == nil {
 		writeJSON(w, out)
@@ -271,10 +256,10 @@ func (s *Server) writeLockState(w http.ResponseWriter) {
 	}
 
 	for _, d := range decisions {
-		if d.Kind == "grant" || d.Kind == "override" {
+		if d.Kind == db.DecisionGrant || d.Kind == db.DecisionOverride || d.Kind == db.DecisionShortUnblock {
 			out.ReleasedSecondsToday += d.DurationSeconds
 		}
-		if d.Kind == "override" {
+		if d.Kind == db.DecisionOverride {
 			out.OverrideCountToday++
 		}
 	}
@@ -333,7 +318,7 @@ func (s *Server) LockDecisionsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.logLockDecision("denial", body.UserMessage, body.AgentMessage, 0)
+	s.logLockDecision(db.DecisionDenial, body.UserMessage, body.AgentMessage, 0)
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
@@ -559,25 +544,25 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 		log.Debug("Received message", "type", message.Type)
 
 		switch message.Type {
-		case "get_focusing":
+		case wsGetFocusing:
 			focusInfo := s.State.GetCurrentFocusInfo()
 			if err := s.State.NotifySingleClient(conn, focusInfo); err != nil {
 				log.Error("Failed to send focus state to client", "err", err)
 			}
-		case "focus":
+		case wsFocus:
 			duration := 30 * 60 // default 30 minutes
 			if message.Duration > 0 {
 				duration = message.Duration
 			}
 			s.State.HandleFocusChange(true, duration)
-		case "attention":
+		case wsAttention:
 			switch message.State {
 			case "site", "idle", "away":
 				s.AttentionTracker.Handle(message.State, message.Site)
 			default:
 				log.Warn("Invalid attention state", "state", message.State)
 			}
-		case "temptation":
+		case wsTemptation:
 			// source is an open label set by the client (chromium, firefox,
 			// android, …); a new client must not need a server change.
 			if message.Source == "" || message.Target == "" {
@@ -585,28 +570,35 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 			} else {
 				s.logTemptation(message.Source, message.Target)
 			}
-		case "override":
-			// A fixed 15 minutes, priced at a written reason and, after the first
-			// of the day, at a wait that grows by 30s each time. The release
-			// broadcast tells every client; the journal tells the judge.
-			if message.Message == "" {
+		case wsOverride:
+			// One button, one message, whatever the phase: the first click of the
+			// day grants 15 minutes outright, later clicks arm a countdown that
+			// grows by 30s per redeemed override, and a click on a ripe request
+			// redeems it. The wait runs from the click, never in the background.
+			_, outcome, reason := s.State.TakeOverride(message.Message)
+			switch outcome {
+			case OverrideGranted:
+				// ReleaseAgentLock already broadcast the new state to every client.
+				s.logLockDecision(db.DecisionOverride, reason, "", OverrideSeconds)
+			case OverrideArmed:
+				// The countdown is shared state: every client shows it ticking.
+				s.logLockDecision(db.DecisionOverrideArmed, reason, "", 0)
+				go s.State.NotifyAllClients(s.State.GetCurrentFocusInfo())
+			case OverrideCooling:
+				// Nothing changed; refresh the clicker so its display is honest.
+				if err := s.State.NotifySingleClient(conn, s.State.GetCurrentFocusInfo()); err != nil {
+					log.Error("Failed to send focus state to client", "err", err)
+				}
+			case OverrideNeedsReason:
 				log.Warn("Override without a reason ignored")
-			} else if cooldown, taken := s.State.TakeOverride(); !taken {
-				s.refuseUnblock(conn, "override", cooldown)
-			} else {
-				s.logLockDecision("override", message.Message, "", OverrideSeconds)
 			}
 
-		case "short_unblock":
-			// The way out of a cooldown: 30 seconds, no reason asked, capped per
-			// window. Free by design, so it is not journalled as an override and
-			// does not lengthen the cooldown it interrupts.
-			if cooldown, taken := s.State.TakeShortUnblock(); !taken {
-				s.refuseUnblock(conn, "short_unblock", cooldown)
-			} else {
-				s.logLockDecision("short_unblock", "", "", ShortUnblockSeconds)
-			}
-		case "ping":
+		case wsShortUnblock:
+			// The peek: 30 seconds, no reason asked, never refused. Not journalled
+			// as an override, so it neither escalates nor answers an armed request.
+			s.State.TakeShortUnblock()
+			s.logLockDecision(db.DecisionShortUnblock, "", "", ShortUnblockSeconds)
+		case wsPing:
 			// "type" is what current clients match on; "response" is kept for
 			// backwards compatibility with older clients.
 			response := struct {
