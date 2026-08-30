@@ -29,25 +29,8 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        // Coach overlay section
-        item { SectionHeader("Coach Overlay") }
-        item {
-            OverlaySettings(
-                message = settings.overlayMessage,
-                buttonText = settings.overlayButtonText,
-                colorHex = settings.overlayColor,
-                buttonColorHex = settings.overlayButtonColor,
-                targetApp = settings.overlayTargetApp,
-                installedApps = state.installedApps,
-                onMessageChange = { viewModel.updateSettings { s -> s.copy(overlayMessage = it) } },
-                onButtonTextChange = { viewModel.updateSettings { s -> s.copy(overlayButtonText = it) } },
-                onColorChange = { viewModel.updateSettings { s -> s.copy(overlayColor = it) } },
-                onButtonColorChange = { viewModel.updateSettings { s -> s.copy(overlayButtonColor = it) } },
-                onTargetAppChange = { viewModel.updateSettings { s -> s.copy(overlayTargetApp = it) } },
-            )
-        }
-
-        // Rules overlay section
+        // Rules overlay section — the chat wall handles every non-rule block,
+        // so rules are the only overlay left to dress.
         item { SectionHeader("Rules Overlay") }
         item {
             OverlaySettings(

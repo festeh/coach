@@ -136,15 +136,12 @@ class MonitorLogic(
 
     // --- App Change Handling (called from FocusMonitorService) ---
 
-    private enum class BlockMode { CHAT, STANDARD_OVERLAY, NONE }
-
-    private fun blockMode(packageName: String): BlockMode {
-        if (!monitoredPackages.contains(packageName)) return BlockMode.NONE
-        // Agent lock wins over manual focus when both are active.
-        if (_focusData.value.isAgentLocked) return BlockMode.CHAT
-        if (_focusData.value.isFocusing) return BlockMode.STANDARD_OVERLAY
-        return BlockMode.NONE
-    }
+    // Any lock means the chat wall. The agent lock and manual focus used to
+    // wall differently, but the overlay half was unreachable in practice (it
+    // needed a focus session running inside an active release), and the chat
+    // is where every lock gets argued about now.
+    private fun isWalled(packageName: String): Boolean =
+        monitoredPackages.contains(packageName) && _focusData.value.isFocused
 
     fun onAppChanged(packageName: String) {
         Log.d(tag, "App changed to: $packageName")
@@ -161,35 +158,26 @@ class MonitorLogic(
                     ),
                 )
 
-                val mode = blockMode(packageName)
+                val walled = isWalled(packageName)
                 Log.i(
                     tag,
-                    "Block decision for $packageName - focusing: ${_focusData.value.isFocusing}, agentLocked: ${_focusData.value.isAgentLocked}, monitored: ${monitoredPackages.contains(packageName)}, mode: $mode",
+                    "Block decision for $packageName - focusing: ${_focusData.value.isFocusing}, agentLocked: ${_focusData.value.isAgentLocked}, monitored: ${monitoredPackages.contains(packageName)}, walled: $walled",
                 )
 
-                when (mode) {
-                    BlockMode.CHAT -> {
-                        // Android 15 refuses activity starts from a background
-                        // service unless the app has a visible window at that
-                        // moment. Flash the overlay to earn the exemption, start
-                        // the chat, then drop it so it can't cover the chat.
-                        withContext(Dispatchers.Main) {
-                            overlayManager?.show(packageName)
-                            launchForcedChat()
-                            overlayManager?.hide()
-                        }
+                if (walled) {
+                    // Android 15 refuses activity starts from a background
+                    // service unless the app has a visible window at that
+                    // moment. Flash the launch cover to earn the exemption,
+                    // start the chat, then drop it so it can't cover the chat.
+                    withContext(Dispatchers.Main) {
+                        overlayManager?.showLaunchCover()
+                        launchForcedChat()
+                        overlayManager?.hide()
                     }
-                    BlockMode.STANDARD_OVERLAY -> {
-                        withContext(Dispatchers.Main) { overlayManager?.show(packageName) }
-                    }
-                    BlockMode.NONE -> {
-                        withContext(Dispatchers.Main) { overlayManager?.hide() }
-                    }
-                }
-
-                // A blocked watched-app open is a temptation; reuse the decision above.
-                if (mode != BlockMode.NONE) {
+                    // A blocked watched-app open is a temptation.
                     webSocketService.sendTemptation(packageName)
+                } else {
+                    withContext(Dispatchers.Main) { overlayManager?.hide() }
                 }
 
                 // Check rules independently of focus state
@@ -201,29 +189,14 @@ class MonitorLogic(
     }
 
     fun ensureOverlay(packageName: String) {
-        val mode = blockMode(packageName)
-        when (mode) {
-            BlockMode.STANDARD_OVERLAY -> {
-                if (overlayManager?.isShowing() != true) {
-                    Log.i(tag, "Re-showing overlay for $packageName (was dismissed externally)")
-                    scope.launch {
-                        withContext(Dispatchers.Main) {
-                            overlayManager?.show(packageName)
-                        }
-                    }
-                }
+        if (!isWalled(packageName)) return
+        Log.i(tag, "Re-launching chat for $packageName (was bypassed)")
+        scope.launch {
+            withContext(Dispatchers.Main) {
+                overlayManager?.showLaunchCover()
+                launchForcedChat()
+                overlayManager?.hide()
             }
-            BlockMode.CHAT -> {
-                Log.i(tag, "Re-launching chat for $packageName (was bypassed)")
-                scope.launch {
-                    withContext(Dispatchers.Main) {
-                        overlayManager?.show(packageName)
-                        launchForcedChat()
-                        overlayManager?.hide()
-                    }
-                }
-            }
-            BlockMode.NONE -> {}
         }
     }
 
@@ -263,7 +236,7 @@ class MonitorLogic(
             } else {
                 Log.i(tag, "Re-showing pending challenge for rule ${rule.id} on $packageName")
                 withContext(Dispatchers.Main) {
-                    overlayManager?.show(packageName, "rule", rule.challengeType, rule.id)
+                    overlayManager?.show(packageName, rule.challengeType, rule.id)
                 }
                 return
             }
@@ -294,7 +267,7 @@ class MonitorLogic(
                             Log.i(tag, "Rule ${rule.id} triggered with challenge ${rule.challengeType}, pending completion")
                         }
                         withContext(Dispatchers.Main) {
-                            overlayManager?.show(packageName, "rule", rule.challengeType, rule.id)
+                            overlayManager?.show(packageName, rule.challengeType, rule.id)
                         }
                         break // Only one rule popup per app open
                     } else {

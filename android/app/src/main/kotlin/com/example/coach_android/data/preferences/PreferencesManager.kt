@@ -143,15 +143,10 @@ class PreferencesManager(
 
     fun loadSettings(): AppSettings =
         AppSettings(
-            overlayMessage = str("settingsOverlayMessage", AppSettings.DEFAULT_OVERLAY_MESSAGE),
-            overlayColor = str("settingsOverlayColor", AppSettings.DEFAULT_OVERLAY_COLOR),
-            overlayButtonText = str("settingsOverlayButtonText", AppSettings.DEFAULT_OVERLAY_BUTTON_TEXT),
-            overlayButtonColor = str("settingsOverlayButtonColor", AppSettings.DEFAULT_OVERLAY_BUTTON_COLOR),
             rulesOverlayMessage = str("settingsRulesOverlayMessage", AppSettings.DEFAULT_RULES_OVERLAY_MESSAGE),
             rulesOverlayColor = str("settingsRulesOverlayColor", AppSettings.DEFAULT_RULES_OVERLAY_COLOR),
             rulesOverlayButtonText = str("settingsRulesOverlayButtonText", AppSettings.DEFAULT_RULES_OVERLAY_BUTTON_TEXT),
             rulesOverlayButtonColor = str("settingsRulesOverlayButtonColor", AppSettings.DEFAULT_RULES_OVERLAY_BUTTON_COLOR),
-            overlayTargetApp = str("settingsOverlayTargetApp", AppSettings.DEFAULT_OVERLAY_TARGET_APP),
             rulesOverlayTargetApp = str("settingsRulesOverlayTargetApp", AppSettings.DEFAULT_RULES_OVERLAY_TARGET_APP),
             longPressDurationSeconds = int("settingsLongPressDuration", AppSettings.DEFAULT_LONG_PRESS_DURATION_SECONDS),
             typingPhrase = str("settingsTypingPhrase", AppSettings.DEFAULT_TYPING_PHRASE),
@@ -160,15 +155,10 @@ class PreferencesManager(
     fun saveSettings(settings: AppSettings) {
         prefs
             .edit()
-            .putString("settingsOverlayMessage", settings.overlayMessage)
-            .putString("settingsOverlayColor", settings.overlayColor)
-            .putString("settingsOverlayButtonText", settings.overlayButtonText)
-            .putString("settingsOverlayButtonColor", settings.overlayButtonColor)
             .putString("settingsRulesOverlayMessage", settings.rulesOverlayMessage)
             .putString("settingsRulesOverlayColor", settings.rulesOverlayColor)
             .putString("settingsRulesOverlayButtonText", settings.rulesOverlayButtonText)
             .putString("settingsRulesOverlayButtonColor", settings.rulesOverlayButtonColor)
-            .putString("settingsOverlayTargetApp", settings.overlayTargetApp)
             .putString("settingsRulesOverlayTargetApp", settings.rulesOverlayTargetApp)
             .putInt("settingsLongPressDuration", settings.longPressDurationSeconds)
             .putString("settingsTypingPhrase", settings.typingPhrase)

@@ -40,14 +40,42 @@ class OverlayManager(
 
     var onChallengeCompleted: ((ruleId: String) -> Unit)? = null
 
+    // The bare minimum of a visible window. Android 15 only lets a background
+    // service start an activity while the app is showing one, so the chat wall
+    // flashes this cover for the milliseconds between show and launch; nobody
+    // is meant to read it.
+    fun showLaunchCover() {
+        if (overlayView != null) hide()
+        if (!Settings.canDrawOverlays(context)) {
+            Log.w(TAG, "Cannot show launch cover: Permission not granted.")
+            return
+        }
+        val cover = View(context).apply { setBackgroundColor(0xCC000000.toInt()) }
+        val params =
+            WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                PixelFormat.TRANSLUCENT,
+            )
+        try {
+            windowManager.addView(cover, params)
+            overlayView = cover
+        } catch (e: Exception) {
+            Log.e(TAG, "Error adding launch cover", e)
+            overlayView = null
+        }
+    }
+
+    // Rule walls only: every other block goes to the chat.
     fun show(
         packageName: String,
-        overlayType: String? = null,
-        challengeType: String? = null,
-        ruleId: String? = null,
+        challengeType: String?,
+        ruleId: String?,
     ) {
         if (overlayView != null) {
-            Log.d(TAG, "Replacing existing overlay for $packageName (type: ${overlayType ?: "coach"})")
+            Log.d(TAG, "Replacing existing overlay for $packageName")
             hide()
         }
         if (!Settings.canDrawOverlays(context)) {
@@ -58,18 +86,17 @@ class OverlayManager(
         currentRuleId = ruleId
         val effectiveChallengeType = challengeType ?: "none"
 
-        Log.d(TAG, "Showing overlay for $packageName (type: ${overlayType ?: "coach"}, challenge: $effectiveChallengeType)")
+        Log.d(TAG, "Showing rule overlay for $packageName (challenge: $effectiveChallengeType)")
 
         val settings =
             com.example.coach_android.data.preferences
                 .PreferencesManager(context)
                 .loadSettings()
-        val isRule = overlayType == "rule"
-        currentTargetApp = if (isRule) settings.rulesOverlayTargetApp else settings.overlayTargetApp
-        val customMessage = if (isRule) settings.rulesOverlayMessage else settings.overlayMessage
-        val overlayColorHex = if (isRule) settings.rulesOverlayColor else settings.overlayColor
-        val customButtonText = if (isRule) settings.rulesOverlayButtonText else settings.overlayButtonText
-        val buttonColorHex = if (isRule) settings.rulesOverlayButtonColor else settings.overlayButtonColor
+        currentTargetApp = settings.rulesOverlayTargetApp
+        val customMessage = settings.rulesOverlayMessage
+        val overlayColorHex = settings.rulesOverlayColor
+        val customButtonText = settings.rulesOverlayButtonText
+        val buttonColorHex = settings.rulesOverlayButtonColor
 
         val appName =
             if (packageName.isNotEmpty()) {
