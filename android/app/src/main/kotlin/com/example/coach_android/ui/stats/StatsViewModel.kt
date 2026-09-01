@@ -1,135 +1,212 @@
 package com.example.coach_android.ui.stats
 
 import android.app.Application
-import android.app.usage.UsageStatsManager
-import android.content.Context
 import android.content.pm.PackageManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.coach_android.FocusMonitorService
+import com.example.coach_android.data.coach.UnlockDayDto
+import com.example.coach_android.data.coach.UnlockStatsRepository
 import com.example.coach_android.data.db.EventDao
 import com.example.coach_android.data.db.UsageDatabase
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.ZoneId
 
-data class AppUsageEntry(
-    val packageName: String,
-    val appName: String,
-    val totalTimeMs: Long,
+enum class StatsRange(
+    val days: Int,
+    val label: String,
+) {
+    WEEK(7, "7 days"),
+    MONTH(30, "30 days"),
+    QUARTER(90, "90 days"),
+}
+
+data class InteractionDay(
+    val date: LocalDate,
+    val temptations: Int = 0,
+    val unlocks: Int = 0,
+    val unlockedSeconds: Int = 0,
 )
 
-data class BlockedAppEntry(
+data class TemptingApp(
     val packageName: String,
     val appName: String,
     val count: Int,
 )
 
 data class StatsUiState(
-    val selectedDate: LocalDate = LocalDate.now(),
-    val focusSessions: Int = 0,
-    val totalFocusTime: Int = 0,
-    val blockedAppOpens: Int = 0,
-    val appUsage: List<AppUsageEntry> = emptyList(),
-    val blockedApps: List<BlockedAppEntry> = emptyList(),
+    val range: StatsRange = StatsRange.WEEK,
+    val overridesToday: Int = 0,
+    val days: List<InteractionDay> = emptyList(),
+    val temptingApps: List<TemptingApp> = emptyList(),
     val isLoading: Boolean = true,
-)
+    val isRefreshing: Boolean = false,
+    val error: String? = null,
+) {
+    val totalTemptations: Int get() = days.sumOf { it.temptations }
+    val totalUnlocks: Int get() = days.sumOf { it.unlocks }
+    val totalUnlockedSeconds: Int get() = days.sumOf { it.unlockedSeconds }
+}
 
 class StatsViewModel(
     application: Application,
 ) : AndroidViewModel(application) {
-    private val db = UsageDatabase.create(application)
-    private val eventDao: EventDao = db.eventDao()
+    private val eventDao: EventDao = UsageDatabase.create(application).eventDao()
     private val _state = MutableStateFlow(StatsUiState())
     val state: StateFlow<StatsUiState> = _state.asStateFlow()
 
-    init {
-        loadStats()
+    private var focusJob: Job? = null
+    private var refreshJob: Job? = null
+
+    fun onStart() {
+        observeLiveOverrideCount()
+        refresh()
     }
 
-    fun previousDay() {
-        _state.value = _state.value.copy(selectedDate = _state.value.selectedDate.minusDays(1))
-        loadStats()
+    fun onStop() {
+        focusJob?.cancel()
+        focusJob = null
+        refreshJob?.cancel()
+        refreshJob = null
     }
 
-    fun nextDay() {
-        val next = _state.value.selectedDate.plusDays(1)
-        if (!next.isAfter(LocalDate.now())) {
-            _state.value = _state.value.copy(selectedDate = next)
-            loadStats()
-        }
+    fun selectRange(range: StatsRange) {
+        if (_state.value.range == range) return
+        _state.value = _state.value.copy(range = range)
+        refresh()
     }
 
-    fun goToToday() {
-        _state.value = _state.value.copy(selectedDate = LocalDate.now())
-        loadStats()
-    }
+    fun refresh() {
+        refreshJob?.cancel()
+        val range = _state.value.range
+        _state.value =
+            _state.value.copy(
+                isLoading = _state.value.days.isEmpty(),
+                isRefreshing = _state.value.days.isNotEmpty(),
+                error = null,
+            )
 
-    private fun loadStats() {
-        val date = _state.value.selectedDate
-        val zone = ZoneId.systemDefault()
-        val dayStart = date.atStartOfDay(zone).toEpochSecond()
-        val dayEnd = date.plusDays(1).atStartOfDay(zone).toEpochSecond()
+        refreshJob =
+            viewModelScope.launch {
+                try {
+                    val today = LocalDate.now()
+                    val firstDay = today.minusDays(range.days.toLong() - 1)
+                    val zone = ZoneId.systemDefault()
+                    val start = firstDay.atStartOfDay(zone).toEpochSecond()
+                    val end = today.plusDays(1).atStartOfDay(zone).toEpochSecond()
 
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val sessions = eventDao.countFocusSessions(dayStart, dayEnd)
-                val totalTime = eventDao.totalFocusTime(dayStart, dayEnd)
-                val blocked = eventDao.countBlockedAppOpens(dayStart, dayEnd)
+                    val result =
+                        coroutineScope {
+                            val local =
+                                async(Dispatchers.IO) {
+                                    eventDao.temptationsByDay(start, end) to
+                                        eventDao.temptingAppsForPeriod(start, end)
+                                }
+                            val remote =
+                                async {
+                                    val repository = awaitUnlockStatsRepository()
+                                    repository?.fetchWindow(range.days)
+                                        ?: repository?.stats?.value.orEmpty()
+                                }
+                            local.await() to remote.await()
+                        }
 
-                val blockedApps =
-                    eventDao.blockedAppsForDay(dayStart, dayEnd).map { entry ->
-                        BlockedAppEntry(
-                            packageName = entry.packageName,
-                            appName = resolveAppName(entry.packageName),
-                            count = entry.count,
+                    if (_state.value.range != range) return@launch
+
+                    val (local, unlockRows) = result
+                    val (temptationRows, appRows) = local
+                    val temptationsByDate =
+                        temptationRows.associate { row ->
+                            LocalDate.parse(row.day) to row.count
+                        }
+                    val unlocksByDate = unlockRows.toUnlockMap()
+                    val days =
+                        (0 until range.days).map { offset ->
+                            val date = firstDay.plusDays(offset.toLong())
+                            val unlock = unlocksByDate[date]
+                            InteractionDay(
+                                date = date,
+                                temptations = temptationsByDate[date] ?: 0,
+                                unlocks = unlock?.unlocks ?: 0,
+                                unlockedSeconds = unlock?.unlockedSeconds ?: 0,
+                            )
+                        }
+                    val apps =
+                        appRows.take(MAX_APPS).map { row ->
+                            TemptingApp(
+                                packageName = row.packageName,
+                                appName = resolveAppName(row.packageName),
+                                count = row.count,
+                            )
+                        }
+
+                    _state.value =
+                        _state.value.copy(
+                            days = days,
+                            temptingApps = apps,
+                            isLoading = false,
+                            isRefreshing = false,
+                            error = null,
                         )
-                    }
-
-                val appUsage = loadAppUsage(dayStart * 1000, dayEnd * 1000)
-
-                _state.value =
-                    _state.value.copy(
-                        focusSessions = sessions,
-                        totalFocusTime = totalTime,
-                        blockedAppOpens = blocked,
-                        appUsage = appUsage,
-                        blockedApps = blockedApps,
-                        isLoading = false,
-                    )
-            } catch (_: Exception) {
-                _state.value = _state.value.copy(isLoading = false)
+                } catch (e: Exception) {
+                    _state.value =
+                        _state.value.copy(
+                            isLoading = false,
+                            isRefreshing = false,
+                            error = e.message ?: "Could not load activity",
+                        )
+                }
             }
+    }
+
+    // The service is started just before Compose is attached, so its singleton
+    // may trail the first frame by a fraction of a second. Wait for it instead
+    // of pinning the day's override count to zero for this whole tab visit.
+    private fun observeLiveOverrideCount() {
+        if (focusJob?.isActive == true) return
+        focusJob =
+            viewModelScope.launch {
+                while (isActive) {
+                    val focusData =
+                        FocusMonitorService
+                            .getInstance()
+                            ?.getMonitorLogic()
+                            ?.focusData
+                    if (focusData == null) {
+                        delay(SERVICE_RETRY_MS)
+                        continue
+                    }
+                    focusData.collect { data ->
+                        _state.value = _state.value.copy(overridesToday = data.overridesToday)
+                    }
+                    delay(SERVICE_RETRY_MS)
+                }
+            }
+    }
+
+    private suspend fun awaitUnlockStatsRepository(): UnlockStatsRepository? {
+        repeat(SERVICE_RETRY_COUNT) {
+            val repository = FocusMonitorService.getInstance()?.getUnlockStats()
+            if (repository != null) return repository
+            delay(SERVICE_RETRY_MS)
         }
+        return null
     }
 
-    private fun loadAppUsage(
-        startTimeMs: Long,
-        endTimeMs: Long,
-    ): List<AppUsageEntry> {
-        val usm =
-            getApplication<Application>()
-                .getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
-                ?: return emptyList()
-
-        return usm
-            .queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startTimeMs, endTimeMs)
-            .filter { it.totalTimeInForeground > 0 }
-            // The system keeps several rollup buckets per package (splits at
-            // bucket boundaries and reboots), so one day can return the same
-            // app more than once. Merge them or apps show up twice.
-            .groupBy { it.packageName }
-            .map { (pkg, stats) ->
-                AppUsageEntry(
-                    packageName = pkg,
-                    appName = resolveAppName(pkg),
-                    totalTimeMs = stats.sumOf { it.totalTimeInForeground },
-                )
-            }.sortedByDescending { it.totalTimeMs }
-    }
+    private fun List<UnlockDayDto>.toUnlockMap(): Map<LocalDate, UnlockDayDto> =
+        mapNotNull { row ->
+            runCatching { LocalDate.parse(row.day) }.getOrNull()?.let { it to row }
+        }.toMap()
 
     private fun resolveAppName(packageName: String): String =
         try {
@@ -139,4 +216,10 @@ class StatsViewModel(
         } catch (_: PackageManager.NameNotFoundException) {
             packageName
         }
+
+    private companion object {
+        const val MAX_APPS = 8
+        const val SERVICE_RETRY_COUNT = 20
+        const val SERVICE_RETRY_MS = 250L
+    }
 }

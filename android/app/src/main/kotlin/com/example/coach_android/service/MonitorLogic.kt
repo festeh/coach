@@ -148,6 +148,8 @@ class MonitorLogic(
 
         scope.launch {
             try {
+                val walled = isWalled(packageName)
+
                 // Log app open
                 eventDao.insert(
                     EventEntity(
@@ -157,8 +159,16 @@ class MonitorLogic(
                         duringFocus = if (_focusData.value.isFocusing) 1 else 0,
                     ),
                 )
+                if (walled) {
+                    eventDao.insert(
+                        EventEntity(
+                            timestamp = System.currentTimeMillis() / 1000,
+                            eventType = "temptation",
+                            packageName = packageName,
+                        ),
+                    )
+                }
 
-                val walled = isWalled(packageName)
                 Log.i(
                     tag,
                     "Block decision for $packageName - focusing: ${_focusData.value.isFocusing}, agentLocked: ${_focusData.value.isAgentLocked}, monitored: ${monitoredPackages.contains(packageName)}, walled: $walled",

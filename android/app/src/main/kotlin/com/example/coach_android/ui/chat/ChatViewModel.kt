@@ -7,8 +7,6 @@ import com.example.coach_android.FocusMonitorService
 import com.example.coach_android.data.agentchat.AgentChatService
 import com.example.coach_android.data.agentchat.ChatEvent
 import com.example.coach_android.data.agentchat.ChatMessage
-import com.example.coach_android.data.coach.UnlockDayDto
-import com.example.coach_android.data.coach.UnlockStatsRepository
 import com.example.coach_android.data.model.OverridePhase
 import com.example.coach_android.util.TimeFormatter
 import kotlinx.coroutines.Job
@@ -17,13 +15,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.time.LocalDate
-
-data class UnlockDay(
-    val date: LocalDate,
-    val unlocks: Int,
-    val unlockedSeconds: Int,
-)
 
 data class ChatUiState(
     val messages: List<ChatMessage> = emptyList(),
@@ -32,14 +23,6 @@ data class ChatUiState(
     val error: String? = null,
     val agentLocked: Boolean = true,
     val releaseLeftSeconds: Int = 0,
-    // Oldest first, today last, one entry per day the server reported. Empty
-    // until a cached or fetched answer lands, which keeps the header from
-    // flashing zeros it would have to take back.
-    val unlockTrend: List<UnlockDay> = emptyList(),
-    // The detail sheet's longer window, loaded when it opens. Falls back to the
-    // card's week so the sheet has something to show while the month arrives.
-    val unlockDetail: List<UnlockDay> = emptyList(),
-    val unlockDetailLoading: Boolean = false,
     // The override as the server runs it. The remaining seconds count down
     // locally between server frames; the rest changes only on a decision.
     val overridesToday: Int = 0,
@@ -62,7 +45,6 @@ class ChatViewModel(
 
     private var eventsJob: Job? = null
     private var focusJob: Job? = null
-    private var statsJob: Job? = null
     private var tickJob: Job? = null
 
     fun onStart() {
@@ -82,7 +64,6 @@ class ChatViewModel(
                 // reply. Now it just updates the header's lock chip; leaving is
                 // the user's move.
                 FocusMonitorService.getInstance()?.getMonitorLogic()?.focusData?.collect { data ->
-                    val wasLocked = _state.value.agentLocked
                     _state.value =
                         _state.value.copy(
                             agentLocked = data.isAgentLocked,
@@ -96,12 +77,8 @@ class ChatViewModel(
                         )
                     // The server's numbers are the truth; resync the local clock.
                     startOverrideTicker()
-                    if (wasLocked && !data.isAgentLocked) {
-                        refreshStatsAfterGrant()
-                    }
                 }
             }
-        observeUnlockStats()
         chat.connect()
     }
 
@@ -148,47 +125,9 @@ class ChatViewModel(
         eventsJob = null
         focusJob?.cancel()
         focusJob = null
-        statsJob?.cancel()
-        statsJob = null
         tickJob?.cancel()
         tickJob = null
         chatService()?.disconnect()
-    }
-
-    // The cached ledger renders at once; the server's answer replaces it. Days the
-    // server didn't report simply aren't drawn — better a short week than invented
-    // zeroes.
-    private fun observeUnlockStats() {
-        val repository = unlockStats() ?: return
-        statsJob?.cancel()
-        statsJob =
-            viewModelScope.launch {
-                repository.stats.collect { days ->
-                    _state.value = _state.value.copy(unlockTrend = toUnlockDays(days))
-                }
-            }
-        viewModelScope.launch { repository.refresh() }
-    }
-
-    // Loaded on each open so the sheet is never showing a month that has moved on.
-    fun loadUnlockDetail() {
-        val repository = unlockStats() ?: return
-        _state.value = _state.value.copy(unlockDetailLoading = true)
-        viewModelScope.launch {
-            val days = repository.fetchWindow(DETAIL_DAYS)
-            _state.value =
-                _state.value.copy(
-                    unlockDetail = days?.let(::toUnlockDays) ?: _state.value.unlockDetail,
-                    unlockDetailLoading = false,
-                )
-        }
-    }
-
-    // A grant lands as a lock-state flip on the focus socket; the ledger it came
-    // from is the server's, so ask again rather than guessing the new totals.
-    private fun refreshStatsAfterGrant() {
-        val repository = unlockStats() ?: return
-        viewModelScope.launch { repository.refresh() }
     }
 
     fun send(content: String) {
@@ -314,23 +253,4 @@ class ChatViewModel(
 
     private fun chatService(): AgentChatService? =
         FocusMonitorService.getInstance()?.getAgentChatService()
-
-    private fun unlockStats(): UnlockStatsRepository? =
-        FocusMonitorService.getInstance()?.getUnlockStats()
-
-    // A day the server labelled unparseably is dropped rather than drawn wrong.
-    private fun toUnlockDays(days: List<UnlockDayDto>): List<UnlockDay> =
-        days.mapNotNull { day ->
-            runCatching { LocalDate.parse(day.day) }.getOrNull()?.let { date ->
-                UnlockDay(
-                    date = date,
-                    unlocks = day.unlocks,
-                    unlockedSeconds = day.unlockedSeconds,
-                )
-            }
-        }
-
-    private companion object {
-        const val DETAIL_DAYS = 30
-    }
 }

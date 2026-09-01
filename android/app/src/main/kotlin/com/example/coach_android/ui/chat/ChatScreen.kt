@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -33,7 +32,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -42,18 +40,14 @@ import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -76,9 +70,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.coach_android.data.agentchat.ChatMessage
 import com.example.coach_android.data.model.OverridePhase
 import com.example.coach_android.util.TimeFormatter
-import java.time.LocalDate
-import java.time.format.TextStyle
-import java.util.Locale
 import kotlinx.coroutines.launch
 
 @Composable
@@ -91,7 +82,6 @@ fun ChatScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf("") }
     var confirmClear by remember { mutableStateOf(false) }
-    var showUnlockDetail by remember { mutableStateOf(false) }
     var overrideDialogOpen by remember { mutableStateOf(false) }
     var overrideReason by remember { mutableStateOf("") }
     var overrideError by remember { mutableStateOf<String?>(null) }
@@ -129,16 +119,6 @@ fun ChatScreen(
             dismissButton = {
                 TextButton(onClick = { confirmClear = false }) { Text("Cancel") }
             },
-        )
-    }
-
-    if (showUnlockDetail) {
-        UnlockDetailSheet(
-            // The card's week stands in until the month lands, so the sheet never
-            // opens empty on a slow network.
-            days = state.unlockDetail.ifEmpty { state.unlockTrend },
-            loading = state.unlockDetailLoading,
-            onDismiss = { showUnlockDetail = false },
         )
     }
 
@@ -207,16 +187,6 @@ fun ChatScreen(
                     overridesToday = state.overridesToday,
                     onPeek = { viewModel.takeShortUnblock() },
                     onRedeem = { viewModel.takeOverride("") },
-                )
-            }
-
-            if (state.unlockTrend.isNotEmpty()) {
-                UnlockStatsCard(
-                    trend = state.unlockTrend,
-                    onClick = {
-                        showUnlockDetail = true
-                        viewModel.loadUnlockDetail()
-                    },
                 )
             }
 
@@ -602,351 +572,6 @@ private fun ordinal(n: Int): String {
             else -> "th"
         }
     return "$n$suffix"
-}
-
-// What today's asking has bought, next to the week it sits in. Its own card, so
-// it reads as the ledger rather than as part of the chat's chrome, and tappable
-// for the month behind the number.
-@Composable
-private fun UnlockStatsCard(
-    trend: List<UnlockDay>,
-    onClick: () -> Unit,
-) {
-    val today = trend.last()
-    val weekSeconds = trend.sumOf { it.unlockedSeconds }
-    val dailyAverage = weekSeconds / trend.size
-
-    Card(
-        onClick = onClick,
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        colors =
-            CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            ),
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Row(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text =
-                        if (today.unlocks == 0) {
-                            "No unlocks yet today"
-                        } else {
-                            val unit = if (today.unlocks == 1) "unlock" else "unlocks"
-                            "${today.unlocks} $unit · ${TimeFormatter.formatFocusTime(today.unlockedSeconds)}"
-                        },
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    // A week with nothing in it has no average worth printing.
-                    text =
-                        if (weekSeconds > 0) {
-                            "today · ${trend.size}d avg ${TimeFormatter.formatFocusTime(dailyAverage)}"
-                        } else {
-                            "nothing in the last ${trend.size} days"
-                        },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            UnlockSparkline(trend = trend)
-
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = "Unlock details",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 4.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun UnlockSparkline(trend: List<UnlockDay>) {
-    val peak = trend.maxOf { it.unlockedSeconds }
-    val emptyColor = MaterialTheme.colorScheme.outlineVariant
-    val pastColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
-    val todayColor = MaterialTheme.colorScheme.primary
-
-    Row(
-        modifier = Modifier.height(SPARK_MAX_HEIGHT),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.Bottom,
-    ) {
-        trend.forEachIndexed { index, day ->
-            // Zero days keep a stub so the week always reads as seven days.
-            val height =
-                if (day.unlockedSeconds <= 0 || peak <= 0) {
-                    SPARK_MIN_HEIGHT
-                } else {
-                    SPARK_MIN_HEIGHT +
-                        (SPARK_MAX_HEIGHT - SPARK_MIN_HEIGHT) * (day.unlockedSeconds.toFloat() / peak)
-                }
-            Box(
-                modifier =
-                    Modifier
-                        .width(6.dp)
-                        .height(height)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(
-                            when {
-                                day.unlockedSeconds <= 0 -> emptyColor
-                                index == trend.lastIndex -> todayColor
-                                else -> pastColor
-                            },
-                        ),
-            )
-        }
-    }
-}
-
-private val SPARK_MIN_HEIGHT = 3.dp
-private val SPARK_MAX_HEIGHT = 20.dp
-
-// The month behind the card: exact numbers per day, which the sparkline can only
-// imply, plus what the recent week looks like against the fuller record.
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun UnlockDetailSheet(
-    days: List<UnlockDay>,
-    loading: Boolean,
-    onDismiss: () -> Unit,
-) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .padding(bottom = 24.dp),
-        ) {
-            Text(
-                text = "Unlocks",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "Every release the coach granted, and every override you took.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            Spacer(Modifier.height(20.dp))
-
-            val today = days.lastOrNull()
-            val lastWeek = days.takeLast(7)
-            val windowAverage = if (days.isEmpty()) 0 else days.sumOf { it.unlockedSeconds } / days.size
-            val weekAverage = if (lastWeek.isEmpty()) 0 else lastWeek.sumOf { it.unlockedSeconds } / lastWeek.size
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                UnlockStatTile(
-                    label = "Today",
-                    value = "${today?.unlocks ?: 0}",
-                    caption = TimeFormatter.formatFocusTime(today?.unlockedSeconds ?: 0),
-                    modifier = Modifier.weight(1f),
-                    emphasised = true,
-                )
-                UnlockStatTile(
-                    label = "7-day avg",
-                    value = TimeFormatter.formatFocusTime(weekAverage),
-                    caption = "per day",
-                    modifier = Modifier.weight(1f),
-                )
-                UnlockStatTile(
-                    label = "${days.size}-day avg",
-                    value = TimeFormatter.formatFocusTime(windowAverage),
-                    caption = "per day",
-                    modifier = Modifier.weight(1f),
-                )
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // The week reads as a verdict only against the longer record.
-            if (windowAverage > 0 && lastWeek.size == 7) {
-                val delta = weekAverage - windowAverage
-                val share = (delta * 100) / windowAverage
-                Text(
-                    text =
-                        when {
-                            share >= 5 -> "This week runs $share% above your ${days.size}-day average."
-                            share <= -5 -> "This week runs ${-share}% below your ${days.size}-day average."
-                            else -> "This week matches your ${days.size}-day average."
-                        },
-                    style = MaterialTheme.typography.bodySmall,
-                    color =
-                        if (share >= 5) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                )
-            }
-
-            Spacer(Modifier.height(20.dp))
-
-            if (loading && days.isEmpty()) {
-                Box(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 32.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(
-                        color = MaterialTheme.colorScheme.primary,
-                        strokeWidth = 3.dp,
-                    )
-                }
-            } else {
-                val peak = days.maxOfOrNull { it.unlockedSeconds } ?: 0
-                LazyColumn(
-                    modifier = Modifier.heightIn(max = 360.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    // Most recent first: the days you're answering for are the ones
-                    // you scroll to least.
-                    items(days.size) { index ->
-                        UnlockDayRow(day = days[days.lastIndex - index], peakSeconds = peak)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun UnlockStatTile(
-    label: String,
-    value: String,
-    caption: String,
-    modifier: Modifier = Modifier,
-    emphasised: Boolean = false,
-) {
-    Column(
-        modifier =
-            modifier
-                .clip(RoundedCornerShape(12.dp))
-                .background(
-                    if (emphasised) {
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerHighest
-                    },
-                ).padding(horizontal = 12.dp, vertical = 10.dp),
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleMedium,
-            color =
-                if (emphasised) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-        )
-        Text(
-            text = caption,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline,
-        )
-    }
-}
-
-@Composable
-private fun UnlockDayRow(
-    day: UnlockDay,
-    peakSeconds: Int,
-) {
-    val today = LocalDate.now()
-    val label =
-        when (day.date) {
-            today -> "Today"
-            today.minusDays(1) -> "Yesterday"
-            else ->
-                "${day.date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())} " +
-                    "${day.date.dayOfMonth} ${day.date.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())}"
-        }
-    val fraction =
-        if (peakSeconds <= 0) 0f else (day.unlockedSeconds.toFloat() / peakSeconds).coerceIn(0f, 1f)
-
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodySmall,
-            color =
-                if (day.date == today) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            modifier = Modifier.width(84.dp),
-        )
-
-        // The bar carries the comparison; the numbers carry the fact.
-        Box(
-            modifier =
-                Modifier
-                    .weight(1f)
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-        ) {
-            if (fraction > 0f) {
-                Box(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth(fraction)
-                            .height(8.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(
-                                if (day.date == today) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-                                },
-                            ),
-                )
-            }
-        }
-
-        Text(
-            text = if (day.unlocks == 0) "—" else "${day.unlocks}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.End,
-            modifier = Modifier.width(32.dp),
-        )
-        Text(
-            text = if (day.unlockedSeconds == 0) "" else TimeFormatter.formatFocusTime(day.unlockedSeconds),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline,
-            textAlign = TextAlign.End,
-            modifier = Modifier.width(56.dp),
-        )
-    }
 }
 
 @Composable

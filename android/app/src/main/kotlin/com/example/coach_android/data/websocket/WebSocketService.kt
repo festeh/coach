@@ -132,14 +132,13 @@ class WebSocketService(
             val dataMap = jsonObjectToMap(data)
             val messageType = (data["type"]?.jsonPrimitive?.content)
 
-            // Handle response to pending request. Gated on the frame type a
-            // get_focusing reply actually has, so an unsolicited frame arriving
-            // mid-request is no longer swallowed as its answer.
+            // Complete a pending request, then still publish the frame below.
+            // Periodic focus queries rely on that publication to refresh
+            // countdowns in MonitorLogic and the persistent notification.
             val pending = pendingRequest
             if (pending != null && messageType == "focusing") {
                 pendingRequest = null
                 pending.complete(dataMap)
-                return
             }
 
             // Emit focus updates. The server stamps every focus frame with this

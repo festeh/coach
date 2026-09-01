@@ -4,8 +4,13 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 
-data class BlockedAppEntry(
+data class TemptingAppEntry(
     @androidx.room.ColumnInfo(name = "package_name") val packageName: String,
+    val count: Int,
+)
+
+data class TemptationDayEntry(
+    val day: String,
     val count: Int,
 )
 
@@ -16,51 +21,30 @@ interface EventDao {
 
     @Query(
         """
-        SELECT COUNT(*) FROM events
-        WHERE event_type = 'focus_started'
+        SELECT date(timestamp, 'unixepoch', 'localtime') AS day, COUNT(*) AS count
+        FROM events
+        WHERE event_type = 'temptation'
         AND timestamp >= :startTimestamp AND timestamp < :endTimestamp
+        GROUP BY day
+        ORDER BY day ASC
     """,
     )
-    suspend fun countFocusSessions(
+    suspend fun temptationsByDay(
         startTimestamp: Long,
         endTimestamp: Long,
-    ): Int
+    ): List<TemptationDayEntry>
 
     @Query(
         """
-        SELECT COALESCE(SUM(duration), 0) FROM events
-        WHERE event_type = 'focus_ended'
-        AND timestamp >= :startTimestamp AND timestamp < :endTimestamp
-    """,
-    )
-    suspend fun totalFocusTime(
-        startTimestamp: Long,
-        endTimestamp: Long,
-    ): Int
-
-    @Query(
-        """
-        SELECT COUNT(*) FROM events
-        WHERE event_type = 'app_opened' AND during_focus = 1
-        AND timestamp >= :startTimestamp AND timestamp < :endTimestamp
-    """,
-    )
-    suspend fun countBlockedAppOpens(
-        startTimestamp: Long,
-        endTimestamp: Long,
-    ): Int
-
-    @Query(
-        """
-        SELECT package_name, COUNT(*) as count FROM events
-        WHERE event_type = 'app_opened' AND during_focus = 1
+        SELECT package_name, COUNT(*) AS count FROM events
+        WHERE event_type = 'temptation' AND package_name IS NOT NULL
         AND timestamp >= :startTimestamp AND timestamp < :endTimestamp
         GROUP BY package_name
         ORDER BY count DESC
     """,
     )
-    suspend fun blockedAppsForDay(
+    suspend fun temptingAppsForPeriod(
         startTimestamp: Long,
         endTimestamp: Long,
-    ): List<BlockedAppEntry>
+    ): List<TemptingAppEntry>
 }

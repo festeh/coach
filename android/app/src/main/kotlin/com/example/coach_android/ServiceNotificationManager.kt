@@ -82,7 +82,7 @@ class ServiceNotificationManager(
 
         val title = if (focusData.isFocused) STATUS_FOCUSING else STATUS_NOT_FOCUSING
 
-        val content =
+        val status =
             when {
                 focusData.isFocusing && focusData.focusTimeLeft > 0 ->
                     "Manual session: ${TimeFormatter.formatFocusTime(focusData.focusTimeLeft)} left"
@@ -93,8 +93,10 @@ class ServiceNotificationManager(
                 else ->
                     "$CONTENT_MONITORING • ${if (isConnected) STATUS_ACTIVE else STATUS_INACTIVE}"
             }
+        val overrideCount = focusData.overridesToday
+        val dailyStatus = "$overrideCount ${if (overrideCount == 1) "override" else "overrides"} today"
 
-        return title to content
+        return title to "$status • $dailyStatus"
     }
 
     companion object {

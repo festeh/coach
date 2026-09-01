@@ -2,6 +2,7 @@ package com.example.coach_android.ui.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Home
@@ -106,8 +107,11 @@ fun AppNavigation(chatRequestId: Int = 0) {
                         )
                     },
                     navigationIcon = {
-                        TextButton(onClick = { navController.popBackStack() }) {
-                            Text("Back")
+                        IconButton(onClick = { navController.popBackStack() }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                            )
                         }
                     },
                 )
