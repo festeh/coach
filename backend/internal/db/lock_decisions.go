@@ -1,27 +1,23 @@
 package db
 
 import (
-	"errors"
+	"slices"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
-// The journal's decision kinds. One vocabulary, shared by writers and queries.
-const (
-	// DecisionGrant is a release the agent granted after a conversation.
-	DecisionGrant = "grant"
-	// DecisionOverride is a redeemed (or agent-billed) override: 15 minutes taken.
-	DecisionOverride = "override"
-	// DecisionOverrideArmed is click one: a request that started its countdown.
-	// Journalled with its reason even if never redeemed, so abandoned cravings
-	// still tell their story.
-	DecisionOverrideArmed = "override_armed"
-	// DecisionShortUnblock is a 30-second peek.
-	DecisionShortUnblock = "short_unblock"
-	// DecisionDenial is a release the agent refused.
-	DecisionDenial = "denial"
-)
+// DecisionGrant is the one kind written now: a release the user took with OK
+// after giving a reason. Older rows also hold 'override', 'short_unblock' and
+// 'denial' from the days of the judge and its escape hatches.
+const DecisionGrant = "grant"
+
+// releaseKinds are the kinds that took the lock off. Overrides and peeks are
+// gone, but their rows still count toward the days they happened on.
+var releaseKinds = []string{DecisionGrant, "override", "short_unblock"}
+
+// IsRelease reports whether a decision of this kind took the lock off.
+func IsRelease(kind string) bool {
+	return slices.Contains(releaseKinds, kind)
+}
 
 // LockDecision is one persisted agent-lock decision.
 type LockDecision struct {
@@ -46,7 +42,7 @@ type unlockRow struct {
 	durationSeconds int
 }
 
-// InsertLockDecision records a grant, override, or denial.
+// InsertLockDecision records one decision. Source says where it came from.
 func (m *Manager) InsertLockDecision(kind, source, userMessage, agentMessage string, durationSeconds int) error {
 	ctx, cancel := operationContext()
 	defer cancel()
@@ -57,53 +53,6 @@ func (m *Manager) InsertLockDecision(kind, source, userMessage, agentMessage str
 		VALUES ($1, $2, $3, $4, $5)
 	`, kind, source, userMessage, agentMessage, durationSeconds)
 	return err
-}
-
-// TodayOverrideCount returns how many overrides were redeemed today, which is
-// what the escalation is priced from, so a restart doesn't hand back a free
-// override.
-func (m *Manager) TodayOverrideCount() (int, error) {
-	start, end := localDayBounds(time.Now())
-	ctx, cancel := operationContext()
-	defer cancel()
-
-	var count int
-	err := m.pool.QueryRow(ctx, `
-		SELECT count(*) FROM lock_decisions
-		WHERE kind = $1
-		AND created_at >= $2 AND created_at < $3
-	`, DecisionOverride, start, end).Scan(&count)
-	return count, err
-}
-
-// LatestArmedRequest returns today's newest armed override request that no
-// redemption has answered yet — nil when there is none. This is how a running
-// countdown survives a restart instead of handing the wait back.
-func (m *Manager) LatestArmedRequest() (*time.Time, string, error) {
-	start, end := localDayBounds(time.Now())
-	ctx, cancel := operationContext()
-	defer cancel()
-
-	var armedAt time.Time
-	var reason string
-	err := m.pool.QueryRow(ctx, `
-		SELECT created_at, user_message
-		FROM lock_decisions
-		WHERE kind = $1 AND created_at >= $2 AND created_at < $3
-		AND created_at > COALESCE((
-			SELECT max(created_at) FROM lock_decisions
-			WHERE kind = $4 AND created_at >= $2 AND created_at < $3
-		), to_timestamp(0))
-		ORDER BY created_at DESC
-		LIMIT 1
-	`, DecisionOverrideArmed, start, end, DecisionOverride).Scan(&armedAt, &reason)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, "", nil
-	}
-	if err != nil {
-		return nil, "", err
-	}
-	return &armedAt, reason, nil
 }
 
 // GetTodayLockDecisions returns today's decisions oldest first, using the
@@ -145,9 +94,8 @@ func (m *Manager) GetTodayLockDecisions() ([]LockDecision, error) {
 }
 
 // GetUnlockStats returns one row per local day for the last `days` days, oldest
-// first, quiet days included as zeroes. Grants, overrides, and escape-hatch
-// unblocks all count: either way the lock was off, which is what the phone's
-// header reports.
+// first, quiet days included as zeroes. Every release kind counts: either way
+// the lock was off, which is what the phone's header reports.
 func (m *Manager) GetUnlockStats(days int) ([]UnlockDay, error) {
 	if days < 1 {
 		days = 1
@@ -166,7 +114,7 @@ func (m *Manager) GetUnlockStats(days int) ([]UnlockDay, error) {
 		WHERE created_at >= $1 AND created_at < $2
 		AND kind = ANY($3)
 		ORDER BY created_at
-	`, start, end, []string{DecisionGrant, DecisionOverride, DecisionShortUnblock})
+	`, start, end, releaseKinds)
 	if err != nil {
 		return nil, err
 	}

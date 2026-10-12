@@ -163,36 +163,27 @@ private fun MetricGrid(state: StatsUiState) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             MetricTile(
-                label = "Overrides",
-                value = state.overridesToday.toString(),
-                caption = "today",
-                accent = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.weight(1f),
-            )
-            MetricTile(
                 label = "Temptations",
                 value = state.totalTemptations.toString(),
                 caption = "blocked opens",
                 accent = MaterialTheme.colorScheme.error,
                 modifier = Modifier.weight(1f),
             )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             MetricTile(
                 label = "Unlocks",
                 value = state.totalUnlocks.toString(),
-                caption = "coach + overrides",
+                caption = "times let in",
                 accent = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.weight(1f),
             )
-            MetricTile(
-                label = "Unlocked",
-                value = TimeFormatter.formatFocusTime(state.totalUnlockedSeconds),
-                caption = "across ${state.range.label}",
-                accent = MaterialTheme.colorScheme.tertiary,
-                modifier = Modifier.weight(1f),
-            )
         }
+        MetricTile(
+            label = "Unlocked",
+            value = TimeFormatter.formatFocusTime(state.totalUnlockedSeconds),
+            caption = "across ${state.range.label}",
+            accent = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

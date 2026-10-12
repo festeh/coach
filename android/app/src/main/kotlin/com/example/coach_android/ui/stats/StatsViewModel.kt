@@ -17,7 +17,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.ZoneId
@@ -46,7 +45,6 @@ data class TemptingApp(
 
 data class StatsUiState(
     val range: StatsRange = StatsRange.WEEK,
-    val overridesToday: Int = 0,
     val days: List<InteractionDay> = emptyList(),
     val temptingApps: List<TemptingApp> = emptyList(),
     val isLoading: Boolean = true,
@@ -65,17 +63,13 @@ class StatsViewModel(
     private val _state = MutableStateFlow(StatsUiState())
     val state: StateFlow<StatsUiState> = _state.asStateFlow()
 
-    private var focusJob: Job? = null
     private var refreshJob: Job? = null
 
     fun onStart() {
-        observeLiveOverrideCount()
         refresh()
     }
 
     fun onStop() {
-        focusJob?.cancel()
-        focusJob = null
         refreshJob?.cancel()
         refreshJob = null
     }
@@ -165,31 +159,6 @@ class StatsViewModel(
                             isRefreshing = false,
                             error = e.message ?: "Could not load activity",
                         )
-                }
-            }
-    }
-
-    // The service is started just before Compose is attached, so its singleton
-    // may trail the first frame by a fraction of a second. Wait for it instead
-    // of pinning the day's override count to zero for this whole tab visit.
-    private fun observeLiveOverrideCount() {
-        if (focusJob?.isActive == true) return
-        focusJob =
-            viewModelScope.launch {
-                while (isActive) {
-                    val focusData =
-                        FocusMonitorService
-                            .getInstance()
-                            ?.getMonitorLogic()
-                            ?.focusData
-                    if (focusData == null) {
-                        delay(SERVICE_RETRY_MS)
-                        continue
-                    }
-                    focusData.collect { data ->
-                        _state.value = _state.value.copy(overridesToday = data.overridesToday)
-                    }
-                    delay(SERVICE_RETRY_MS)
                 }
             }
     }

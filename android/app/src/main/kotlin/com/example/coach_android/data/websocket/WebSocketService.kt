@@ -183,7 +183,9 @@ class WebSocketService(
             }
     }
 
-    private fun sendMessage(message: Map<String, String>) {
+    // Values are strings or numbers; numbers stay numbers on the wire, because
+    // the server decodes fields like `duration` into integers.
+    private fun sendMessage(message: Map<String, Any>) {
         val ws = webSocket
         if (!isConnected || ws == null) {
             throw Exception("WebSocket not connected")
@@ -193,7 +195,15 @@ class WebSocketService(
                 kotlinx.serialization.json.JsonObject
                     .serializer(),
                 kotlinx.serialization.json.buildJsonObject {
-                    message.forEach { (k, v) -> put(k, kotlinx.serialization.json.JsonPrimitive(v)) }
+                    message.forEach { (k, v) ->
+                        put(
+                            k,
+                            when (v) {
+                                is Number -> kotlinx.serialization.json.JsonPrimitive(v)
+                                else -> kotlinx.serialization.json.JsonPrimitive(v.toString())
+                            },
+                        )
+                    }
                 },
             )
         if (!ws.send(jsonStr)) {
@@ -218,23 +228,25 @@ class WebSocketService(
         }
     }
 
-    // One message whatever the phase: the server decides if the tap grants the
-    // day's first override, arms a countdown, or redeems a ripe request. The
-    // reason is required to grant or arm and ignored on a redeem — callers pass
-    // an empty string for a redeem tap.
-    fun sendOverride(reason: String) {
+    // The user's OK on the coach's reply (source "chat"), or on the local offer
+    // made while the coach was unreachable (source "fallback"). The server
+    // releases the lock and journals the reason with the coach's answer.
+    // Throws when the socket is down, so the caller can keep the OK on screen.
+    fun sendRelease(
+        durationSeconds: Int,
+        reason: String,
+        agentMessage: String,
+        source: String,
+    ) {
         sendMessage(
             mapOf(
-                "type" to "override",
-                "message" to reason.trim(),
+                "type" to "release",
+                "duration" to durationSeconds,
+                "message" to reason,
+                "agent_message" to agentMessage,
+                "source" to source,
             ),
         )
-    }
-
-    // The peek: 30 seconds, no reason asked, never refused. The nag of tapping
-    // again every half-minute is the only price.
-    fun sendShortUnblock() {
-        sendMessage(mapOf("type" to "short_unblock"))
     }
 
     suspend fun sendFocusCommand(durationMinutes: Int = 0) {

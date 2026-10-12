@@ -52,10 +52,9 @@ function setupBrowserListeners(): void {
       case "reconnect":
         wsManager.reconnect();
         break;
-      case "override":
-      case "short_unblock":
-        // From the chat page: rides the coach socket like temptations do,
-        // so the page needs no host permissions of its own.
+      case "release":
+        // The OK from the chat page: rides the coach socket like temptations
+        // do, so the page needs no host permissions of its own.
         wsManager.send(message);
         break;
       case "sync_whitelist":
@@ -238,19 +237,10 @@ export default defineBackground({
       },
       onFocusMessage: async (message) => {
         try {
-          // The one wire→storage mapping; everyone else passes the snapshot whole.
+          // The one wire→storage mapping; pages read storage, never the frame.
           await setStorage({
             focusing: message.focusing,
-            agent_release_time_left: message.agent_release_time_left,
-            override_state: {
-              overrides_today: message.overrides_today,
-              override_phase: message.override_phase,
-              override_cooldown_seconds: message.override_cooldown_seconds,
-              override_cooldown_remaining: message.override_cooldown_remaining,
-              override_redeem_remaining: message.override_redeem_remaining,
-              override_next_cooldown_seconds: message.override_next_cooldown_seconds,
-              synced_at: Date.now()
-            }
+            agent_release_time_left: message.agent_release_time_left
           });
           await updateIcon(true, message.focusing || message.agent_release_time_left === null);
         } catch (error) {

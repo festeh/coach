@@ -10,15 +10,18 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import java.time.OffsetDateTime
 
 // Frame kinds on the chat socket — mirror my-agents' WsIn/WsOut enums.
 private object ClientFrame {
@@ -29,6 +32,7 @@ private object ClientFrame {
 private object ServerFrame {
     const val HISTORY = "history"
     const val CHUNK = "chunk"
+    const val OK = "ok"
     const val DONE = "done"
     const val ERROR = "error"
     const val PONG = "pong"
@@ -92,6 +96,10 @@ class AgentChatService(
     private val _events = MutableSharedFlow<ChatEvent>(extraBufferCapacity = 32)
     val events: SharedFlow<ChatEvent> = _events.asSharedFlow()
 
+    // Whether a reason sent now would reach the coach. When it wouldn't, the
+    // chat lets the user in on its own rather than leaving them walled.
+    val connected: Boolean get() = isConnected
+
     fun connect() {
         if (wsUrl.isEmpty()) {
             Log.w(tag, "Agent chat URL not configured")
@@ -113,7 +121,12 @@ class AgentChatService(
         isConnecting = false
     }
 
-    fun send(content: String) {
+    // `blocked` names the app the user was walled from, so the coach can ask
+    // about it; null when the chat was opened by hand.
+    fun send(
+        content: String,
+        blocked: String? = null,
+    ) {
         val ws = webSocket
         if (!isConnected || ws == null) {
             Log.w(tag, "send() called while not connected (isConnected=$isConnected, ws=${ws != null})")
@@ -126,6 +139,9 @@ class AgentChatService(
                 buildJsonObject {
                     put("type", JsonPrimitive(ClientFrame.MESSAGE))
                     put("content", JsonPrimitive(content))
+                    if (blocked != null) {
+                        put("context", buildJsonObject { put("blocked", JsonPrimitive(blocked)) })
+                    }
                 },
             )
         val queued = ws.send(frame)
@@ -211,13 +227,17 @@ class AgentChatService(
                                     HistoryRole.AI -> ChatMessage.Role.ASSISTANT
                                     else -> return@mapNotNull null
                                 }
-                            ChatMessage(role = mapped, content = content)
+                            ChatMessage(role = mapped, content = content, ok = okEvent(m["events"]))
                         }
                     scope.launch { _events.emit(ChatEvent.History(messages)) }
                 }
                 ServerFrame.CHUNK -> {
                     val piece = obj["content"]?.jsonPrimitive?.content ?: return
                     scope.launch { _events.emit(ChatEvent.Chunk(piece)) }
+                }
+                ServerFrame.OK -> {
+                    val offer = parseOk(obj) ?: return
+                    scope.launch { _events.emit(ChatEvent.Ok(offer)) }
                 }
                 ServerFrame.DONE -> {
                     scope.launch { _events.emit(ChatEvent.Done) }
@@ -234,6 +254,27 @@ class AgentChatService(
             Log.e(tag, "Failed to parse frame: ${e.message}")
         }
     }
+
+    // A history entry's events, as the server replays them: the reply's OK, if
+    // it carried one.
+    private fun okEvent(events: JsonElement?): OkOffer? =
+        (events as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            ?.firstOrNull { it["type"]?.jsonPrimitive?.content == ServerFrame.OK }
+            ?.let(::parseOk)
+
+    private fun parseOk(obj: JsonObject): OkOffer? =
+        try {
+            OkOffer(
+                minutes = obj["minutes"]!!.jsonPrimitive.int,
+                // OffsetDateTime takes both "Z" and "+00:00"; Instant.parse
+                // on older runtimes only takes the former.
+                at = OffsetDateTime.parse(obj["at"]!!.jsonPrimitive.content).toInstant(),
+            )
+        } catch (e: Exception) {
+            Log.w(tag, "Ignoring malformed ok event: $obj")
+            null
+        }
 
     // Retried as long as a screen wants the socket — shouldReconnect is cleared on
     // disconnect(), so this stops when the chat closes rather than after a fixed

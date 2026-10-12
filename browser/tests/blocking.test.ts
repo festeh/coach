@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { blockPage, cancelPendingBlock, forgetTab, noteTabCreated } from "../src/lib/blocking";
+import { blockedTargetOf, blockPage, cancelPendingBlock, forgetTab, noteTabCreated } from "../src/lib/blocking";
 
 let tabId = 0;
 let attached: boolean;
@@ -40,7 +40,19 @@ test("an attached agent can navigate to an otherwise blocked URL", async () => {
 
 test("ordinary tabs still redirect into Coach", async () => {
   assert.deepEqual(await visit(), { blocked: true, target: "blocked.example" });
-  assert.deepEqual(redirects, ["chrome-extension://coach/chat.html?blocked=blocked.example"]);
+  assert.deepEqual(redirects, ["chrome-extension://coach/chat.html?blocked=https%3A%2F%2Fblocked.example%2F"]);
+});
+
+test("the chat page reads back the full blocked URL", async () => {
+  await visit("https://blocked.example/watch?v=1#t=30");
+  const target = blockedTargetOf(new URL(redirects[0]).search);
+  assert.deepEqual(target, { url: "https://blocked.example/watch?v=1#t=30", host: "blocked.example" });
+});
+
+test("the chat page never navigates to a non-web blocked target", () => {
+  assert.equal(blockedTargetOf("?blocked=javascript%3Aalert(1)"), null);
+  assert.equal(blockedTargetOf("?blocked=blocked.example"), null);
+  assert.equal(blockedTargetOf(""), null);
 });
 
 test("another tab's debugger does not exempt this tab", async () => {

@@ -1,33 +1,42 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import { SendHorizontal, RefreshCw, ShieldOff, Trash2, Eye } from 'lucide-svelte';
+	import { SendHorizontal, RefreshCw, Trash2 } from 'lucide-svelte';
+	import { blockedTargetOf } from '../../lib/blocking';
 	import { CoachState } from '../../lib/coachState.svelte';
-	import { OverridePhase } from '../../lib/background/types';
 	import { ChatClient } from '../../lib/chat/client.svelte';
-	import { chatWsUrl } from '../../lib/chat/protocol';
+	import { chatWsUrl, liveOfferIndex, releaseFor } from '../../lib/chat/protocol';
 	import { getOrCreateThreadId } from '../../lib/chat/thread';
-	import { formatCountdown, formatTime } from '../../lib/format';
+	import { formatTime } from '../../lib/format';
 
 	const agentsUrl = import.meta.env.VITE_AGENTS as string;
 	const coachToken = (import.meta.env.VITE_COACH_TOKEN as string | undefined) ?? '';
 
 	const coach = new CoachState();
-	// Set when the blocked-page redirect brought the user here: which wall they hit.
-	const blockedHost = new URLSearchParams(location.search).get('blocked') ?? '';
+	// Set when the blocked-page redirect brought the user here: the page they
+	// asked for, and its site for the coach and the banner.
+	const blocked = blockedTargetOf(location.search);
 	let client = $state<ChatClient | null>(null);
 	let draft = $state('');
 	let scroller = $state<HTMLElement | null>(null);
 
-	const phase = $derived(coach.livePhase);
-	// Cooling waits; idle needs the reason typed; ready takes a bare click.
-	const overrideDisabled = $derived(
-		phase === OverridePhase.Cooling || (phase === OverridePhase.Idle && !draft.trim())
+	// Ticked so a stale OK disappears while the page sits open.
+	let now = $state(Date.now());
+	const offerIndex = $derived(
+		client && !client.awaitingReply ? liveOfferIndex(client.messages, now) : -1
 	);
 
 	onMount(async () => {
 		const threadId = await getOrCreateThreadId();
-		client = new ChatClient(chatWsUrl(agentsUrl, threadId, coachToken));
+		client = new ChatClient(
+			chatWsUrl(agentsUrl, threadId, coachToken),
+			blocked ? { blocked: blocked.host } : undefined
+		);
 		client.connect();
+	});
+
+	onMount(() => {
+		const tick = setInterval(() => (now = Date.now()), 10_000);
+		return () => clearInterval(tick);
 	});
 
 	onDestroy(() => client?.disconnect());
@@ -46,8 +55,8 @@
 	let wasBlocked = true;
 	$effect(() => {
 		const open = !coach.focus && coach.agentReleaseTimeLeft !== null;
-		if (open && wasBlocked && blockedHost) {
-			location.href = `https://${blockedHost}`;
+		if (open && wasBlocked && blocked) {
+			location.href = blocked.url;
 		}
 		wasBlocked = !open;
 	});
@@ -59,39 +68,14 @@
 		draft = '';
 	}
 
-	// One button, whatever the phase; the server decides what the click means.
-	// The first click of the day grants outright, later ones arm a countdown
-	// (the typed message is the recorded reason either way), and a click on a
-	// ripe request redeems it bare. Rides the background's coach socket, so it
-	// works even if the agent chat is down — the coach is bypassed, not consulted.
-	function override(): void {
-		const reason = draft.trim();
-		if (phase === OverridePhase.Idle) {
-			if (!reason) return;
-			browser.runtime.sendMessage({ type: 'override', message: reason });
-			draft = '';
-			return;
-		}
-		browser.runtime.sendMessage({ type: 'override', message: '' });
-	}
-
-	// The peek: 30 seconds, no reason asked, never refused. The nag of coming
-	// back every half-minute is the only price.
-	function peek(): void {
-		browser.runtime.sendMessage({ type: 'short_unblock' });
-	}
-
-	function overrideTitle(): string {
-		if (phase === OverridePhase.Ready) {
-			return `Take your 15 minutes — ${formatCountdown(coach.liveRedeemRemaining)} left to claim.`;
-		}
-		if (phase === OverridePhase.Cooling) {
-			return `Waiting — ${formatCountdown(coach.liveCooldownRemaining)} until the override is yours.`;
-		}
-		if (coach.override.overrides_today === 0) {
-			return 'Override: take 15 minutes. Your typed message becomes the recorded reason.';
-		}
-		return `Request override: starts a ${formatTime(coach.override.override_cooldown_seconds)} wait, then come back to take it. Your typed message becomes the recorded reason.`;
+	// The OK: rides the background's coach socket, which opens the lock; the
+	// release frame that comes back takes the user on to the blocked page.
+	function accept(index: number): void {
+		if (!client) return;
+		const release = releaseFor(client.messages, index);
+		if (!release) return;
+		client.takeOffer(index);
+		browser.runtime.sendMessage(release);
 	}
 
 	function lockLine(): string {
@@ -127,15 +111,14 @@
 		<span class="text-xs" style:color="var(--color-ink-muted)">{lockLine()}</span>
 	</header>
 
-	{#if blockedHost}
+	{#if blocked}
 		<div
 			class="shrink-0 px-4 py-2 text-xs text-center border-b"
 			style:border-color="var(--color-line)"
 			style:background-color="var(--color-surface-2)"
 			style:color="var(--color-ink-muted)"
 		>
-			Blocked: <span style:color="var(--color-bad)">{blockedHost}</span> — state your case, or
-			type a reason and request the override.
+			What brings you to <span style:color="var(--color-ink)">{blocked.host}</span>?
 		</div>
 	{/if}
 
@@ -143,16 +126,16 @@
 		{#if client}
 			{#if client.messages.length === 0 && !client.streamText && client.status === 'open'}
 				<p class="text-sm text-center my-auto" style:color="var(--color-ink-subtle)">
-					State your case. The coach decides.
+					Tell the coach why you're here. Any honest reason works.
 				</p>
 			{/if}
 
-			{#each client.messages as message}
+			{#each client.messages as message, index}
 				{#if message.role === 'error'}
 					<p class="text-xs text-center" style:color="var(--color-bad)">{message.content}</p>
 				{:else if message.role === 'notice'}
 					<p class="text-xs text-center" style:color="var(--color-ink-muted)">{message.content}</p>
-				{:else}
+				{:else if message.content}
 					<div
 						class="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap {message.role ===
 						'human'
@@ -164,6 +147,19 @@
 					>
 						{message.content}
 					</div>
+				{/if}
+				{#if index === offerIndex && message.offer}
+					<button
+						type="button"
+						class="{message.role === 'notice'
+							? 'self-center'
+							: 'self-start'} rounded-xl px-4 py-2 text-sm font-medium transition-colors"
+						style:background-color="var(--color-accent-soft)"
+						style:color="var(--color-accent-strong)"
+						onclick={() => accept(index)}
+					>
+						OK · {message.offer.minutes} min
+					</button>
 				{/if}
 			{/each}
 
@@ -201,23 +197,14 @@
 		{/if}
 	</section>
 
-	{#if phase !== OverridePhase.Idle || coach.focus}
+	{#if coach.focus}
 		<div
 			class="shrink-0 px-4 py-2 text-xs text-center border-t"
 			style:border-color="var(--color-line)"
 			style:background-color="var(--color-surface-2)"
-			style:color={phase === OverridePhase.Ready
-				? 'var(--color-accent-strong)'
-				: 'var(--color-ink-muted)'}
+			style:color="var(--color-ink-muted)"
 		>
-			{#if phase === OverridePhase.Cooling}
-				Override in {formatCountdown(coach.liveCooldownRemaining)} — come back for it.
-			{:else if phase === OverridePhase.Ready}
-				Override ready — {formatCountdown(coach.liveRedeemRemaining)} left to take it.
-			{/if}
-			{#if coach.focus}
-				Focus session running — any release ends it.
-			{/if}
+			Focus session running — any release ends it.
 		</div>
 	{/if}
 
@@ -230,44 +217,19 @@
 			type="text"
 			class="flex-1 rounded-xl px-4 py-2.5 text-sm outline-none"
 			style:background-color="var(--color-surface-2)"
-			placeholder="Ask for a release…"
+			placeholder="Your reason…"
 			bind:value={draft}
-			disabled={!client || client.status !== 'open'}
+			disabled={!client || client.status === 'connecting'}
 		/>
 		<button
 			type="submit"
 			class="p-2.5 rounded-xl transition-colors disabled:opacity-40"
 			style:background-color="var(--color-accent-soft)"
 			style:color="var(--color-accent-strong)"
-			disabled={!client || client.status !== 'open' || client.awaitingReply || !draft.trim()}
+			disabled={!client || client.status === 'connecting' || client.awaitingReply || !draft.trim()}
 			aria-label="Send"
 		>
 			<SendHorizontal size={16} />
-		</button>
-		<button
-			type="button"
-			class="p-2.5 rounded-xl transition-colors disabled:opacity-40"
-			style:background-color="var(--color-surface-2)"
-			style:color="var(--color-ink-muted)"
-			onclick={peek}
-			title="Peek: 30 seconds, no reason asked."
-			aria-label="Peek — 30 seconds"
-		>
-			<Eye size={16} />
-		</button>
-		<button
-			type="button"
-			class="p-2.5 rounded-xl transition-colors disabled:opacity-40"
-			style:background-color={phase === OverridePhase.Ready
-				? 'var(--color-accent-soft)'
-				: 'var(--color-surface-2)'}
-			style:color="var(--color-bad)"
-			disabled={overrideDisabled}
-			onclick={override}
-			title={overrideTitle()}
-			aria-label="Override"
-		>
-			<ShieldOff size={16} />
 		</button>
 	</form>
 </main>

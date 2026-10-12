@@ -39,7 +39,6 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -48,7 +47,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -68,7 +66,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.coach_android.data.agentchat.ChatMessage
-import com.example.coach_android.data.model.OverridePhase
 import com.example.coach_android.util.TimeFormatter
 import kotlinx.coroutines.launch
 
@@ -78,13 +75,14 @@ fun ChatScreen(
     // True when hosted inside the app's Scaffold (the Chat tab), which already
     // consumes system-bar insets — padding again would draw dead bands.
     embedded: Boolean = false,
+    // The app behind the wall, when the chat was opened by one.
+    blockedApp: BlockedApp? = null,
+    // Called once the OK's release has landed, to put the user back in the app.
+    onReturnToApp: (BlockedApp) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf("") }
     var confirmClear by remember { mutableStateOf(false) }
-    var overrideDialogOpen by remember { mutableStateOf(false) }
-    var overrideReason by remember { mutableStateOf("") }
-    var overrideError by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
@@ -97,7 +95,16 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.content?.length) {
+    LaunchedEffect(blockedApp) { viewModel.setBlockedApp(blockedApp) }
+
+    LaunchedEffect(state.returnTo) {
+        state.returnTo?.let {
+            onReturnToApp(it)
+            viewModel.onReturned()
+        }
+    }
+
+    LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.content?.length, state.pendingOk) {
         if (state.messages.isNotEmpty()) {
             listState.animateScrollToItem(state.messages.lastIndex)
         }
@@ -122,33 +129,6 @@ fun ChatScreen(
         )
     }
 
-    if (overrideDialogOpen) {
-        val close = {
-            overrideDialogOpen = false
-            overrideReason = ""
-            overrideError = null
-        }
-        OverrideDialog(
-            reason = overrideReason,
-            error = overrideError,
-            overridesToday = state.overridesToday,
-            cooldownSeconds = state.cooldownSeconds,
-            onReasonChange = {
-                overrideReason = it
-                overrideError = null
-            },
-            onConfirm = {
-                viewModel.takeOverride(overrideReason).fold(
-                    onSuccess = { close() },
-                    onFailure = { error ->
-                        overrideError = error.message ?: "Could not request the override"
-                    },
-                )
-            },
-            onDismiss = close,
-        )
-    }
-
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
@@ -165,30 +145,10 @@ fun ChatScreen(
                 streaming = state.streaming,
                 agentLocked = state.agentLocked,
                 releaseLeftSeconds = state.releaseLeftSeconds,
-                overridePhase = state.overridePhase,
-                overridesToday = state.overridesToday,
-                cooldownSeconds = state.cooldownSeconds,
-                cooldownRemaining = state.cooldownRemaining,
-                redeemRemaining = state.redeemRemaining,
                 onClear = { confirmClear = true },
-                onRequestOverride = { overrideDialogOpen = true },
-                onRedeemOverride = { viewModel.takeOverride("") },
-                onPeek = { viewModel.takeShortUnblock() },
             )
 
-            // While a request is live, its state is stated plainly rather than
-            // hidden behind a menu item: the countdown to come back for, or the
-            // window to claim in before it evaporates.
-            if (state.overridePhase != OverridePhase.IDLE) {
-                OverrideBanner(
-                    phase = state.overridePhase,
-                    cooldownRemaining = state.cooldownRemaining,
-                    redeemRemaining = state.redeemRemaining,
-                    overridesToday = state.overridesToday,
-                    onPeek = { viewModel.takeShortUnblock() },
-                    onRedeem = { viewModel.takeOverride("") },
-                )
-            }
+            state.blockedApp?.let { app -> BlockedBanner(label = app.label) }
 
             state.error?.let { err ->
                 ErrorBanner(message = err, onRetry = viewModel::reconnect)
@@ -234,10 +194,15 @@ fun ChatScreen(
                             },
                         ) { idx ->
                             val message = state.messages[idx]
-                            MessageBubble(
-                                message = message,
-                                isLatest = idx == state.messages.lastIndex,
-                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                MessageBubble(
+                                    message = message,
+                                    isLatest = idx == state.messages.lastIndex,
+                                )
+                                state.pendingOk
+                                    ?.takeIf { it.messageIndex == idx }
+                                    ?.let { ok -> OkButton(minutes = ok.minutes, onClick = viewModel::takeOk) }
+                            }
                         }
                     }
                 }
@@ -274,15 +239,7 @@ private fun ChatHeader(
     streaming: Boolean,
     agentLocked: Boolean,
     releaseLeftSeconds: Int,
-    overridePhase: OverridePhase,
-    overridesToday: Int,
-    cooldownSeconds: Int,
-    cooldownRemaining: Int,
-    redeemRemaining: Int,
     onClear: () -> Unit,
-    onRequestOverride: () -> Unit,
-    onRedeemOverride: () -> Unit,
-    onPeek: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val statusText = when {
@@ -389,36 +346,6 @@ private fun ChatHeader(
                         onDismissRequest = { menuExpanded = false },
                     ) {
                         DropdownMenuItem(
-                            text = {
-                                Text(
-                                    when (overridePhase) {
-                                        OverridePhase.COOLING ->
-                                            "Override in ${TimeFormatter.formatCountdown(cooldownRemaining)}"
-                                        OverridePhase.READY ->
-                                            "Take your 15 minutes · ${TimeFormatter.formatCountdown(redeemRemaining)} left"
-                                        OverridePhase.IDLE ->
-                                            if (overridesToday == 0) {
-                                                "Take 15-minute override"
-                                            } else {
-                                                "Request override · ${TimeFormatter.formatCountdown(cooldownSeconds)} wait"
-                                            }
-                                    },
-                                )
-                            },
-                            enabled = overridePhase != OverridePhase.COOLING,
-                            onClick = {
-                                menuExpanded = false
-                                if (overridePhase == OverridePhase.READY) onRedeemOverride() else onRequestOverride()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Peek · 30 seconds") },
-                            onClick = {
-                                menuExpanded = false
-                                onPeek()
-                            },
-                        )
-                        DropdownMenuItem(
                             text = { Text("Clear conversation") },
                             onClick = {
                                 menuExpanded = false
@@ -439,139 +366,35 @@ private fun ChatHeader(
     }
 }
 
-// The reason buys the request, not the override: after the first of the day,
-// the tap only starts the wait, and the 15 minutes are taken by coming back
-// once it lapses.
+// Under the latest reply that lets the user in: the coach's OK, or the local
+// one when the coach can't be reached.
 @Composable
-private fun OverrideDialog(
-    reason: String,
-    error: String?,
-    overridesToday: Int,
-    cooldownSeconds: Int,
-    onReasonChange: (String) -> Unit,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
+private fun OkButton(
+    minutes: Int,
+    onClick: () -> Unit,
 ) {
-    val firstOfTheDay = overridesToday == 0
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (firstOfTheDay) "Take a 15-minute override?" else "Request an override?") },
-        text = {
-            Column {
-                Text(
-                    if (firstOfTheDay) {
-                        "This bypasses the coach. The first override of the day is immediate; " +
-                            "your reason is recorded in the decision ledger."
-                    } else {
-                        "This is your ${ordinal(overridesToday + 1)} override today, so the wait " +
-                            "starts now: ${TimeFormatter.formatCountdown(cooldownSeconds)}. Come back " +
-                            "when it ends to take your 15 minutes. Your reason is recorded in the " +
-                            "decision ledger."
-                    },
-                )
-                Spacer(Modifier.height(16.dp))
-                OutlinedTextField(
-                    value = reason,
-                    onValueChange = onReasonChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Reason") },
-                    minLines = 2,
-                    maxLines = 4,
-                    isError = error != null,
-                )
-                error?.let { message ->
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = reason.isNotBlank(),
-                onClick = onConfirm,
-            ) { Text(if (firstOfTheDay) "Take override" else "Start the wait") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
-}
-
-// While a request is live the wait is stated plainly rather than hidden behind
-// a disabled menu item — with the door still open next to it: the peek while
-// cooling, the claim while ready.
-@Composable
-private fun OverrideBanner(
-    phase: OverridePhase,
-    cooldownRemaining: Int,
-    redeemRemaining: Int,
-    overridesToday: Int,
-    onPeek: () -> Unit,
-    onRedeem: () -> Unit,
-) {
-    val ready = phase == OverridePhase.READY
-    val tint = if (ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-
-    Surface(
-        color = tint.copy(alpha = 0.10f),
-        modifier = Modifier.fillMaxWidth(),
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 40.dp),
+        horizontalArrangement = Arrangement.Start,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text =
-                        if (ready) {
-                            "Override ready · ${TimeFormatter.formatCountdown(redeemRemaining)} to take it"
-                        } else {
-                            "Override in ${TimeFormatter.formatCountdown(cooldownRemaining)}"
-                        },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = tint,
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text =
-                        if (ready) {
-                            "Unclaimed, it evaporates — no penalty, same wait next time."
-                        } else {
-                            "$overridesToday ${if (overridesToday == 1) "override" else "overrides"} today. " +
-                                "A 30s peek is one tap away."
-                        },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Button(
-                onClick = if (ready) onRedeem else onPeek,
-                colors =
-                    ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        contentColor = MaterialTheme.colorScheme.onSurface,
-                    ),
-            ) { Text(if (ready) "Take 15 min" else "Peek 30s", style = MaterialTheme.typography.labelMedium) }
-        }
+        Button(onClick = onClick) { Text("OK · $minutes min") }
     }
 }
 
-private fun ordinal(n: Int): String {
-    val suffix =
-        when {
-            n % 100 in 11..13 -> "th"
-            n % 10 == 1 -> "st"
-            n % 10 == 2 -> "nd"
-            n % 10 == 3 -> "rd"
-            else -> "th"
-        }
-    return "$n$suffix"
+// Says which app brought the user here, and asks about it.
+@Composable
+private fun BlockedBanner(label: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            text = "What brings you to $label?",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+        )
+    }
 }
 
 @Composable
@@ -579,6 +402,16 @@ private fun MessageBubble(
     message: ChatMessage,
     isLatest: Boolean,
 ) {
+    if (message.role == ChatMessage.Role.NOTICE) {
+        Text(
+            text = message.content,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+        )
+        return
+    }
     val isUser = message.role == ChatMessage.Role.USER
     val bubbleColor =
         if (isUser) MaterialTheme.colorScheme.primary
@@ -710,14 +543,14 @@ private fun EmptyHint() {
         }
         Spacer(Modifier.height(20.dp))
         Text(
-            text = "Make your case",
+            text = "What do you need?",
             style = MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Tell the coach why you need a break.\nBe honest — it listens.",
+            text = "Tell the coach what you're about to do.\nAny honest reason works.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

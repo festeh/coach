@@ -7,14 +7,38 @@ import com.example.coach_android.FocusMonitorService
 import com.example.coach_android.data.agentchat.AgentChatService
 import com.example.coach_android.data.agentchat.ChatEvent
 import com.example.coach_android.data.agentchat.ChatMessage
-import com.example.coach_android.data.model.OverridePhase
-import com.example.coach_android.util.TimeFormatter
+import com.example.coach_android.data.agentchat.OkOffer
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import java.time.Duration
+import java.time.Instant
+
+// The app the user was walled from: the coach asks about it by name, and the
+// OK hands the user back to it.
+data class BlockedApp(
+    val packageName: String,
+    val label: String,
+)
+
+// An OK the user can take right now — on the coach's latest reply, or on the
+// local offer made when the coach can't be reached.
+data class PendingOk(
+    val messageIndex: Int,
+    val minutes: Int,
+    // What the release journals: the reason the OK answered and the reply
+    // that carried it.
+    val reason: String,
+    val reply: String,
+    val source: String,
+    // The coach's offer, to remember it was taken; null for a local offer.
+    val offer: OkOffer?,
+)
 
 data class ChatUiState(
     val messages: List<ChatMessage> = emptyList(),
@@ -23,19 +47,12 @@ data class ChatUiState(
     val error: String? = null,
     val agentLocked: Boolean = true,
     val releaseLeftSeconds: Int = 0,
-    // The override as the server runs it. The remaining seconds count down
-    // locally between server frames; the rest changes only on a decision.
-    val overridesToday: Int = 0,
-    val overridePhase: OverridePhase = OverridePhase.IDLE,
-    // Priced by the server, not derived here: the escalation rule lives there.
-    val cooldownSeconds: Int = 0,
-    val cooldownRemaining: Int = 0,
-    val redeemRemaining: Int = 0,
-    val nextCooldownSeconds: Int = 0,
-) {
-    val coolingDown: Boolean get() = overridePhase == OverridePhase.COOLING
-    val overrideReady: Boolean get() = overridePhase == OverridePhase.READY
-}
+    val blockedApp: BlockedApp? = null,
+    val pendingOk: PendingOk? = null,
+    // Set once the release has landed; the screen hands the user back to the
+    // app and calls onReturned().
+    val returnTo: BlockedApp? = null,
+)
 
 class ChatViewModel(
     application: Application,
@@ -45,7 +62,11 @@ class ChatViewModel(
 
     private var eventsJob: Job? = null
     private var focusJob: Job? = null
-    private var tickJob: Job? = null
+    private var okExpiryJob: Job? = null
+
+    // Offers already taken this session, so a replayed history can't hand the
+    // same OK out twice.
+    private val takenOffers = mutableSetOf<OkOffer>()
 
     fun onStart() {
         val chat = chatService() ?: run {
@@ -60,64 +81,15 @@ class ChatViewModel(
         focusJob?.cancel()
         focusJob =
             viewModelScope.launch {
-                // A grant used to auto-dismiss the chat, racing out the coach's
-                // reply. Now it just updates the header's lock chip; leaving is
-                // the user's move.
                 FocusMonitorService.getInstance()?.getMonitorLogic()?.focusData?.collect { data ->
                     _state.value =
                         _state.value.copy(
                             agentLocked = data.isAgentLocked,
                             releaseLeftSeconds = data.agentReleaseTimeLeft ?: 0,
-                            overridesToday = data.overridesToday,
-                            overridePhase = data.overridePhase,
-                            cooldownSeconds = data.cooldownSeconds,
-                            cooldownRemaining = data.cooldownRemaining,
-                            redeemRemaining = data.redeemRemaining,
-                            nextCooldownSeconds = data.nextCooldownSeconds,
                         )
-                    // The server's numbers are the truth; resync the local clock.
-                    startOverrideTicker()
                 }
             }
         chat.connect()
-    }
-
-    // The server sends the override state once per frame, so the phone runs the
-    // clock in between. Every frame resyncs it, which keeps drift from stacking.
-    // When a countdown or redeem window runs out locally, the phase has changed
-    // on the server without a broadcast — ask for a frame instead of guessing
-    // what it became.
-    private fun startOverrideTicker() {
-        tickJob?.cancel()
-        val ticking =
-            when (_state.value.overridePhase) {
-                OverridePhase.COOLING -> _state.value.cooldownRemaining > 0
-                OverridePhase.READY -> _state.value.redeemRemaining > 0
-                OverridePhase.IDLE -> false
-            }
-        if (!ticking) return
-        tickJob =
-            viewModelScope.launch {
-                while (true) {
-                    delay(1_000)
-                    val current = _state.value
-                    val left =
-                        when (current.overridePhase) {
-                            OverridePhase.COOLING -> (current.cooldownRemaining - 1).coerceAtLeast(0)
-                            OverridePhase.READY -> (current.redeemRemaining - 1).coerceAtLeast(0)
-                            OverridePhase.IDLE -> return@launch
-                        }
-                    _state.value =
-                        when (current.overridePhase) {
-                            OverridePhase.COOLING -> current.copy(cooldownRemaining = left)
-                            else -> current.copy(redeemRemaining = left)
-                        }
-                    if (left == 0) {
-                        FocusMonitorService.getInstance()?.getMonitorLogic()?.refreshFocusState()
-                        return@launch
-                    }
-                }
-            }
     }
 
     fun onStop() {
@@ -125,14 +97,23 @@ class ChatViewModel(
         eventsJob = null
         focusJob?.cancel()
         focusJob = null
-        tickJob?.cancel()
-        tickJob = null
         chatService()?.disconnect()
+    }
+
+    fun setBlockedApp(app: BlockedApp?) {
+        _state.value = _state.value.copy(blockedApp = app)
     }
 
     fun send(content: String) {
         val trimmed = content.trim()
         if (trimmed.isEmpty()) return
+        val chat = chatService()
+        if (chat == null || !chat.connected) {
+            // The coach can't hear the reason, but it still counts: the user is
+            // let in rather than left walled by an outage.
+            offerFallback(_state.value.messages + ChatMessage(role = ChatMessage.Role.USER, content = trimmed))
+            return
+        }
         val newMessages =
             _state.value.messages +
                 ChatMessage(role = ChatMessage.Role.USER, content = trimmed) +
@@ -142,8 +123,40 @@ class ChatViewModel(
                 messages = newMessages,
                 streaming = true,
                 error = null,
+                pendingOk = null,
             )
-        chatService()?.send(trimmed)
+        chat.send(trimmed, _state.value.blockedApp?.label)
+    }
+
+    // Release for the OK's minutes, then — when the chat came from a wall —
+    // hand the user back to the app once the release has landed. Launching it
+    // any sooner would only wall it again on arrival.
+    fun takeOk() {
+        val ok = _state.value.pendingOk ?: return
+        val monitorLogic =
+            FocusMonitorService.getInstance()?.getMonitorLogic() ?: run {
+                _state.value = _state.value.copy(error = "Coach service is not available")
+                return
+            }
+        try {
+            monitorLogic.release(ok.minutes * 60, ok.reason, ok.reply, ok.source)
+        } catch (e: Exception) {
+            _state.value = _state.value.copy(error = "Couldn't reach Coach — try OK again")
+            return
+        }
+        ok.offer?.let { takenOffers += it }
+        okExpiryJob?.cancel()
+        _state.value = _state.value.copy(pendingOk = null, error = null)
+
+        val app = _state.value.blockedApp ?: return
+        viewModelScope.launch {
+            withTimeoutOrNull(RELEASE_WAIT_MS) { monitorLogic.focusData.first { !it.isFocused } }
+            _state.value = _state.value.copy(returnTo = app, blockedApp = null)
+        }
+    }
+
+    fun onReturned() {
+        _state.value = _state.value.copy(returnTo = null)
     }
 
     fun reconnect() {
@@ -152,40 +165,6 @@ class ChatViewModel(
             it.disconnect()
             it.connect()
         }
-    }
-
-    // One tap, whatever the phase; the server decides what it means. Idle needs
-    // the written reason (it grants the day's first or arms the countdown);
-    // ready redeems bare; cooling is answered locally to spare the round trip —
-    // the server is still the authority and would refuse it the same way.
-    fun takeOverride(reason: String): Result<Unit> {
-        val monitorLogic =
-            FocusMonitorService.getInstance()?.getMonitorLogic()
-                ?: return Result.failure(IllegalStateException("Coach service is not available"))
-        return when (_state.value.overridePhase) {
-            OverridePhase.READY -> runCatching { monitorLogic.takeOverride("") }
-            OverridePhase.COOLING -> {
-                val left = TimeFormatter.formatCountdown(_state.value.cooldownRemaining)
-                Result.failure(IllegalStateException("Still waiting — $left to go"))
-            }
-            OverridePhase.IDLE -> {
-                val trimmedReason = reason.trim()
-                if (trimmedReason.isEmpty()) {
-                    Result.failure(IllegalArgumentException("A reason is required"))
-                } else {
-                    runCatching { monitorLogic.takeOverride(trimmedReason) }
-                }
-            }
-        }
-    }
-
-    // The peek: 30 seconds, no reason asked, never refused. The nag of tapping
-    // again every half-minute is the only price.
-    fun takeShortUnblock(): Result<Unit> {
-        val monitorLogic =
-            FocusMonitorService.getInstance()?.getMonitorLogic()
-                ?: return Result.failure(IllegalStateException("Coach service is not available"))
-        return runCatching { monitorLogic.takeShortUnblock() }
     }
 
     // The server wipes the thread and replies with an empty history frame,
@@ -203,6 +182,7 @@ class ChatViewModel(
                         connecting = false,
                         error = null,
                     )
+                showOk(latestOk(event.messages))
             }
             is ChatEvent.Connecting -> {
                 _state.value = _state.value.copy(connecting = true)
@@ -225,6 +205,22 @@ class ChatViewModel(
                 }
                 _state.value = _state.value.copy(messages = msgs, streaming = true)
             }
+            is ChatEvent.Ok -> {
+                // The OK belongs to this turn's reply. Frames are emitted on
+                // separate coroutines, so it may land after Done as well as
+                // before; either way it goes on the reply after the last
+                // user message, or on an empty one if the coach said nothing.
+                val msgs = _state.value.messages.toMutableList()
+                val lastUser = msgs.indexOfLast { it.role == ChatMessage.Role.USER }
+                val lastIdx = msgs.indexOfLast { it.role == ChatMessage.Role.ASSISTANT }
+                if (lastIdx > lastUser) {
+                    msgs[lastIdx] = msgs[lastIdx].copy(ok = event.offer)
+                } else {
+                    msgs += ChatMessage(role = ChatMessage.Role.ASSISTANT, content = "", ok = event.offer)
+                }
+                _state.value = _state.value.copy(messages = msgs)
+                if (!_state.value.streaming) showOk(latestOk(msgs))
+            }
             is ChatEvent.Done -> {
                 val msgs = _state.value.messages.toMutableList()
                 val lastIdx = msgs.indexOfLast { it.role == ChatMessage.Role.ASSISTANT }
@@ -232,8 +228,10 @@ class ChatViewModel(
                     msgs[lastIdx] = msgs[lastIdx].copy(streaming = false)
                 }
                 _state.value = _state.value.copy(messages = msgs, streaming = false)
+                showOk(latestOk(msgs))
             }
             is ChatEvent.Error -> {
+                val turnFailed = _state.value.streaming
                 val msgs = _state.value.messages.toMutableList()
                 // Drop trailing empty streaming bubble if the request errored before any content.
                 val lastIdx = msgs.indexOfLast { it.role == ChatMessage.Role.ASSISTANT }
@@ -247,10 +245,81 @@ class ChatViewModel(
                         connecting = false,
                         error = event.message,
                     )
+                // A reason that got no answer still lets the user in.
+                if (turnFailed) offerFallback(msgs)
             }
         }
     }
 
+    // A local notice with its own OK, for the reason in the last user message.
+    private fun offerFallback(messages: List<ChatMessage>) {
+        val reason = messages.lastOrNull { it.role == ChatMessage.Role.USER }?.content ?: return
+        val withNotice =
+            messages +
+                ChatMessage(
+                    role = ChatMessage.Role.NOTICE,
+                    content = "Coach can't be reached right now. Go ahead — take $FALLBACK_MINUTES minutes.",
+                )
+        okExpiryJob?.cancel()
+        _state.value =
+            _state.value.copy(
+                messages = withNotice,
+                streaming = false,
+                pendingOk =
+                    PendingOk(
+                        messageIndex = withNotice.lastIndex,
+                        minutes = FALLBACK_MINUTES,
+                        reason = reason,
+                        reply = "",
+                        source = SOURCE_FALLBACK,
+                        offer = null,
+                    ),
+            )
+    }
+
+    // The coach's OK counts only on its latest reply, only once, and only for
+    // a few minutes — an OK left in yesterday's thread is not a way in today.
+    private fun latestOk(messages: List<ChatMessage>): PendingOk? {
+        val idx = messages.lastIndex
+        val last = messages.getOrNull(idx) ?: return null
+        if (last.role != ChatMessage.Role.ASSISTANT || last.streaming) return null
+        val offer = last.ok ?: return null
+        if (offer in takenOffers || !Instant.now().isBefore(offer.at.plus(OK_LIFETIME))) return null
+        val reason = messages.subList(0, idx).lastOrNull { it.role == ChatMessage.Role.USER }?.content ?: ""
+        return PendingOk(
+            messageIndex = idx,
+            minutes = offer.minutes,
+            reason = reason,
+            reply = last.content,
+            source = SOURCE_CHAT,
+            offer = offer,
+        )
+    }
+
+    private fun showOk(ok: PendingOk?) {
+        okExpiryJob?.cancel()
+        _state.value = _state.value.copy(pendingOk = ok)
+        val offer = ok?.offer ?: return
+        okExpiryJob =
+            viewModelScope.launch {
+                delay(Duration.between(Instant.now(), offer.at.plus(OK_LIFETIME)).toMillis().coerceAtLeast(0))
+                if (_state.value.pendingOk?.offer == offer) {
+                    _state.value = _state.value.copy(pendingOk = null)
+                }
+            }
+    }
+
     private fun chatService(): AgentChatService? =
         FocusMonitorService.getInstance()?.getAgentChatService()
+
+    companion object {
+        private val OK_LIFETIME: Duration = Duration.ofMinutes(5)
+        private const val FALLBACK_MINUTES = 10
+        private const val SOURCE_CHAT = "chat"
+        private const val SOURCE_FALLBACK = "fallback"
+
+        // How long the OK waits for the server's release before handing the
+        // app back anyway.
+        private const val RELEASE_WAIT_MS = 5_000L
+    }
 }

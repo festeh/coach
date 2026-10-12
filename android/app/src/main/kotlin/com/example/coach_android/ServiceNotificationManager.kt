@@ -93,10 +93,7 @@ class ServiceNotificationManager(
                 else ->
                     "$CONTENT_MONITORING • ${if (isConnected) STATUS_ACTIVE else STATUS_INACTIVE}"
             }
-        val overrideCount = focusData.overridesToday
-        val dailyStatus = "$overrideCount ${if (overrideCount == 1) "override" else "overrides"} today"
-
-        return title to "$status • $dailyStatus"
+        return title to status
     }
 
     companion object {

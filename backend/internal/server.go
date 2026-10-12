@@ -70,18 +70,6 @@ func NewServer(adminFS fs.FS) (*Server, error) {
 		server.State.RestoreAgentLock(releaseUntil)
 	}
 
-	// Restore today's override ledger, so a restart is not a way to buy back a
-	// free override or to skip a countdown someone armed and walked away from.
-	if redeemed, err := dbManager.TodayOverrideCount(); err != nil {
-		log.Warn("Failed to load override ledger", "error", err)
-	} else if redeemed > 0 {
-		armedAt, armedReason, err := dbManager.LatestArmedRequest()
-		if err != nil {
-			log.Warn("Failed to load armed override request", "error", err)
-			armedAt = nil
-		}
-		server.State.RestoreOverrideLedger(redeemed, armedAt, armedReason)
-	}
 	server.DBManager = dbManager
 
 	return server, nil
@@ -120,10 +108,8 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/attention/summary", s.AttentionSummaryHandler)
 	mux.HandleFunc("/connect", s.WebsocketHandler)
 	mux.HandleFunc("/agent-lock", s.AgentLockHandler)
-	mux.HandleFunc("/agent-lock/release", s.AgentLockHandler)
 	mux.HandleFunc("/agent-lock/engage", s.AgentLockHandler)
 	mux.HandleFunc("/agent-lock/state", s.AgentLockHandler)
-	mux.HandleFunc("/lock-decisions", s.LockDecisionsHandler)
 	mux.HandleFunc("/lock-decisions/stats", s.LockDecisionStatsHandler)
 	mux.Handle("/admin/", s.AdminHandler())
 

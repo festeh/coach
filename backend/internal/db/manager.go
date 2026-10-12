@@ -115,10 +115,12 @@ func (m *Manager) migrate(ctx context.Context) error {
 			duration_seconds INTEGER NOT NULL DEFAULT 0 CHECK (duration_seconds >= 0),
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		)`,
-		// 'short_unblock' joined the kinds after the table shipped, and CREATE
-		// TABLE IF NOT EXISTS leaves an existing constraint untouched. Postgres
-		// has no ADD CONSTRAINT IF NOT EXISTS, so drop-then-add is the idempotent
-		// form; the name is the one Postgres derived for the inline column check.
+		// Only 'grant' is written now; the other kinds stay allowed for older
+		// rows. 'short_unblock' joined the kinds after the table shipped, and
+		// CREATE TABLE IF NOT EXISTS leaves an existing constraint untouched.
+		// Postgres has no ADD CONSTRAINT IF NOT EXISTS, so drop-then-add is the
+		// idempotent form; the name is the one Postgres derived for the inline
+		// column check.
 		`ALTER TABLE lock_decisions DROP CONSTRAINT IF EXISTS lock_decisions_kind_check`,
 		`ALTER TABLE lock_decisions ADD CONSTRAINT lock_decisions_kind_check
 			CHECK (kind IN ('grant', 'override', 'denial', 'short_unblock'))`,
@@ -146,15 +148,9 @@ func operationContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), queryTimeout)
 }
 
-// LocalDayStart is midnight of now's local day. Exported because the override
-// cooldown resets on the same boundary the journal buckets on — one definition
-// of "a day", not two.
-func LocalDayStart(now time.Time) time.Time {
-	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-}
-
+// localDayBounds is [midnight, next midnight) of now's local day.
 func localDayBounds(now time.Time) (time.Time, time.Time) {
-	start := LocalDayStart(now)
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	return start, start.AddDate(0, 0, 1)
 }
 

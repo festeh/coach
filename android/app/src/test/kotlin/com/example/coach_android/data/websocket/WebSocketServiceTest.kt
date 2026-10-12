@@ -21,6 +21,7 @@ class WebSocketServiceTest {
     private lateinit var server: MockWebServer
     private lateinit var service: WebSocketService
     private val focusFrames = LinkedBlockingQueue<JsonObject>()
+    private val releaseFrames = LinkedBlockingQueue<JsonObject>()
 
     @Before
     fun connect() {
@@ -31,6 +32,7 @@ class WebSocketServiceTest {
                 when (frame["type"]?.jsonPrimitive?.content) {
                     "get_focusing" -> webSocket.send("""{"type":"focusing","focusing":false}""")
                     "focus" -> focusFrames.add(frame)
+                    "release" -> releaseFrames.add(frame)
                 }
             }
 
@@ -65,5 +67,16 @@ class WebSocketServiceTest {
         val frame = focusFrames.poll(5, TimeUnit.SECONDS) ?: error("No focus frame received")
         assertEquals("focus", frame["type"]?.jsonPrimitive?.content)
         assertFalse(frame.containsKey("duration"))
+    }
+
+    @Test
+    fun releaseSendsNumericDurationWithTheJournalFields() {
+        service.sendRelease(600, "lunch order", "Enjoy your lunch.", "chat")
+
+        val frame = releaseFrames.poll(5, TimeUnit.SECONDS) ?: error("No release frame received")
+        assertEquals(600L, frame["duration"]?.jsonPrimitive?.long)
+        assertEquals("lunch order", frame["message"]?.jsonPrimitive?.content)
+        assertEquals("Enjoy your lunch.", frame["agent_message"]?.jsonPrimitive?.content)
+        assertEquals("chat", frame["source"]?.jsonPrimitive?.content)
     }
 }

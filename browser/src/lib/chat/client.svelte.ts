@@ -1,4 +1,15 @@
-import { ClientFrameType, ServerFrameType, type ChatMessage, type ServerFrame } from "./protocol";
+import {
+  ClientFrameType,
+  ServerFrameType,
+  fallbackOffer,
+  historyMessages,
+  offerOf,
+  type ChatMessage,
+  type MessageContext,
+  type ServerFrame
+} from "./protocol";
+
+const FALLBACK_NOTICE = "The coach can't answer right now. Go ahead when you're ready.";
 
 // Page-lifetime chat connection: the tab holds it open, closing the tab
 // drops it. No keepalive — a chat page has a human in it, and a dead
@@ -11,7 +22,7 @@ export class ChatClient {
 
   private ws: WebSocket | null = null;
 
-  constructor(private url: string) {}
+  constructor(private url: string, private context?: MessageContext) {}
 
   connect(): void {
     this.disconnect();
@@ -32,6 +43,8 @@ export class ChatClient {
     ws.onclose = () => {
       if (this.ws !== ws) return; // superseded by a reconnect
       this.foldStream();
+      // A turn the socket dropped will never be answered.
+      if (this.awaitingReply) this.offerFallback();
       this.awaitingReply = false;
       this.status = "closed";
     };
@@ -43,12 +56,18 @@ export class ChatClient {
     ws?.close(1000, "Page closed");
   }
 
+  // With the coach out of reach the reason still counts: the page offers
+  // the OK itself instead of leaving the user stuck behind the lock.
   send(content: string): void {
     const trimmed = content.trim();
-    if (!trimmed || this.status !== "open" || this.awaitingReply) return;
+    if (!trimmed || this.status === "connecting" || this.awaitingReply) return;
     this.messages = [...this.messages, { role: "human", content: trimmed }];
+    if (this.status !== "open") {
+      this.offerFallback();
+      return;
+    }
     this.awaitingReply = true;
-    this.ws!.send(JSON.stringify({ type: ClientFrameType.Message, content: trimmed }));
+    this.ws!.send(JSON.stringify({ type: ClientFrameType.Message, content: trimmed, context: this.context }));
   }
 
   // Wipe the thread server-side; the empty history frame that comes back
@@ -60,17 +79,31 @@ export class ChatClient {
     this.ws!.send(JSON.stringify({ type: ClientFrameType.Clear }));
   }
 
+  // A clicked OK is spent: the page stops showing it.
+  takeOffer(index: number): void {
+    this.messages = this.messages.map((m, i) => (i === index ? { role: m.role, content: m.content } : m));
+  }
+
   private handleFrame(frame: ServerFrame): void {
     switch (frame.type) {
       case ServerFrameType.History:
-        // Tool and system rows are the judge's internals, not dialogue.
-        this.messages = frame.messages
-          .filter((m) => m.role === "human" || m.role === "ai")
-          .map((m) => ({ role: m.role as "human" | "ai", content: m.content }));
+        this.messages = historyMessages(frame.messages);
         break;
       case ServerFrameType.Chunk:
         this.streamText += frame.content;
         break;
+      case ServerFrameType.Ok: {
+        // The OK closes the turn's reply; a turn with no text gets an empty one.
+        const offer = offerOf(frame);
+        if (!offer) break;
+        this.foldStream();
+        const last = this.messages[this.messages.length - 1];
+        this.messages =
+          last?.role === "ai"
+            ? [...this.messages.slice(0, -1), { ...last, offer }]
+            : [...this.messages, { role: "ai", content: "", offer }];
+        break;
+      }
       case ServerFrameType.Done:
         this.foldStream();
         this.awaitingReply = false;
@@ -78,9 +111,14 @@ export class ChatClient {
       case ServerFrameType.Error:
         this.foldStream();
         this.messages = [...this.messages, { role: "error", content: frame.message }];
+        if (this.awaitingReply) this.offerFallback();
         this.awaitingReply = false;
         break;
     }
+  }
+
+  private offerFallback(): void {
+    this.messages = [...this.messages, { role: "notice", content: FALLBACK_NOTICE, offer: fallbackOffer(Date.now()) }];
   }
 
   // Move whatever has streamed so far into the message list, so a close or

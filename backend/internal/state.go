@@ -30,7 +30,6 @@ type State struct {
 	dbManager         *db.Manager
 	agentReleaseUntil *time.Time
 	agentLockTimer    *time.Timer
-	overrides         overrideLedger
 }
 
 type FocusInfo struct {
@@ -40,16 +39,6 @@ type FocusInfo struct {
 	FocusTimeLeft        time.Duration `json:"focus_time_left"`
 	NumFocuses           int           `json:"num_focuses"`
 	AgentReleaseTimeLeft *int64        `json:"agent_release_time_left"`
-
-	// Override state rides the focus frame rather than a second endpoint: the
-	// phone already collects this frame, and the fields are flattened because the
-	// client folds the frame into a flat map and would stringify a nested object.
-	OverridesToday      int           `json:"overrides_today"`
-	OverridePhase       OverridePhase `json:"override_phase"`
-	CooldownSeconds     int           `json:"override_cooldown_seconds"`
-	CooldownRemaining   int           `json:"override_cooldown_remaining"`
-	RedeemRemaining     int           `json:"override_redeem_remaining"`
-	NextCooldownSeconds int           `json:"override_next_cooldown_seconds"`
 }
 
 // AgentLockInfo is the public shape of agent-lock state. TimeLeftSeconds is nil when locked.
@@ -66,9 +55,6 @@ func (s *State) GetCurrentFocusInfo() FocusInfo {
 	if s.stats != nil {
 		numFocuses = s.stats.GetTodayFocusCount()
 	}
-	now := time.Now()
-	s.overrides = s.overrides.at(now)
-	status := overrideStatus(now, s.overrides)
 	return FocusInfo{
 		Type:                 "focusing",
 		Focusing:             s.getTimeLeftLocked() > 0,
@@ -76,12 +62,6 @@ func (s *State) GetCurrentFocusInfo() FocusInfo {
 		FocusTimeLeft:        focusTimeLeft / time.Second,
 		NumFocuses:           numFocuses,
 		AgentReleaseTimeLeft: s.agentReleaseTimeLeftLocked(),
-		OverridesToday:       status.OverridesToday,
-		OverridePhase:        status.Phase,
-		CooldownSeconds:      status.CooldownSeconds,
-		CooldownRemaining:    status.CooldownRemaining,
-		RedeemRemaining:      status.RedeemRemaining,
-		NextCooldownSeconds:  status.NextCooldownSeconds,
 	}
 }
 
@@ -121,123 +101,6 @@ func (s *State) ReleaseAgentLock(d time.Duration) {
 		log.Info("Agent lock released", "until", candidate, "focus_ended", focusEnded)
 		go s.NotifyAllClients(s.GetCurrentFocusInfo())
 	}
-}
-
-// OverrideStatus reads the current phase without changing anything.
-func (s *State) OverrideStatus() OverrideStatus {
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.overrides = s.overrides.at(now)
-	return overrideStatus(now, s.overrides)
-}
-
-// TakeOverride handles a click of the override button, whatever the phase.
-// Idle grants the day's first override outright and arms the countdown for
-// every later one; cooling changes nothing; ready redeems. The returned string
-// is the reason a granted release should journal — the argument on a free
-// grant, the one written at arming on a redemption.
-func (s *State) TakeOverride(reason string) (OverrideStatus, OverrideOutcome, string) {
-	now := time.Now()
-
-	s.mu.Lock()
-	ledger := s.overrides.at(now)
-	status := overrideStatus(now, ledger)
-
-	switch status.Phase {
-	case OverridePhaseCooling:
-		s.overrides = ledger
-		s.mu.Unlock()
-		log.Info("Override clicked mid-countdown, nothing changes", "remaining", status.CooldownRemaining)
-		return status, OverrideCooling, ""
-
-	case OverridePhaseReady:
-		reason = ledger.armedReason
-		ledger.redeemed++
-		ledger.armedAt = time.Time{}
-		ledger.armedReason = ""
-		s.overrides = ledger
-		s.mu.Unlock()
-
-		// Called without the lock: ReleaseAgentLock takes it and broadcasts.
-		s.ReleaseAgentLock(OverrideSeconds * time.Second)
-		log.Info("Override redeemed", "today", ledger.redeemed, "next_cooldown", ledger.cooldownSeconds())
-		return s.OverrideStatus(), OverrideGranted, reason
-	}
-
-	// Idle. Granting and arming are both priced at a written reason.
-	if reason == "" {
-		s.overrides = ledger
-		s.mu.Unlock()
-		return status, OverrideNeedsReason, ""
-	}
-	if ledger.redeemed == 0 {
-		ledger.redeemed++
-		s.overrides = ledger
-		s.mu.Unlock()
-
-		s.ReleaseAgentLock(OverrideSeconds * time.Second)
-		log.Info("Override granted, first of the day")
-		return s.OverrideStatus(), OverrideGranted, reason
-	}
-	ledger.armedAt = now
-	ledger.armedReason = reason
-	s.overrides = ledger
-	s.mu.Unlock()
-
-	log.Info("Override armed", "countdown", ledger.cooldownSeconds())
-	return overrideStatus(now, ledger), OverrideArmed, reason
-}
-
-// TakeShortUnblock releases the lock for ShortUnblockSeconds. Always granted:
-// the peek is uncapped, priced only in the coming-back. A live override
-// request is untouched — its countdown keeps running through the peek.
-func (s *State) TakeShortUnblock() OverrideStatus {
-	s.ReleaseAgentLock(ShortUnblockSeconds * time.Second)
-	log.Info("Short unblock taken")
-	return s.OverrideStatus()
-}
-
-// RecordOverride bills the ledger for an override released through the other
-// road — the HTTP path the agent and future callers use. It neither refuses nor
-// releases, because that already happened; it exists so both roads to a
-// kind='override' row tell the same story about the day, instead of diverging
-// until the next restart re-reads the journal.
-func (s *State) RecordOverride() {
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	ledger := s.overrides.at(now)
-	ledger.redeemed++
-	// The agent's grant makes a live request moot; the next click starts fresh.
-	ledger.armedAt = time.Time{}
-	ledger.armedReason = ""
-	s.overrides = ledger
-	log.Info("Override recorded from HTTP path", "today", ledger.redeemed)
-}
-
-// RestoreOverrideLedger seeds today's counters from the journal on startup, so
-// a restart doesn't reset the escalation or hand back a free override. A nil
-// armedAt means no request was live; an expired one is dropped on arrival.
-func (s *State) RestoreOverrideLedger(redeemed int, armedAt *time.Time, armedReason string) {
-	if redeemed <= 0 {
-		return
-	}
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.overrides = overrideLedger{
-		day:      db.LocalDayStart(now),
-		redeemed: redeemed,
-	}
-	if armedAt != nil {
-		s.overrides.armedAt = *armedAt
-		s.overrides.armedReason = armedReason
-	}
-	s.overrides = s.overrides.at(now)
-	log.Info("Restored override ledger",
-		"redeemed", redeemed,
-		"phase", overrideStatus(now, s.overrides).Phase)
 }
 
 // EngageAgentLock cancels any active release window.

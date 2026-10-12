@@ -23,6 +23,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.coach_android.ui.apps.AppsScreen
+import com.example.coach_android.ui.chat.BlockedApp
 import com.example.coach_android.ui.chat.ChatScreen
 import com.example.coach_android.ui.chat.ChatViewModel
 import com.example.coach_android.ui.debug.DebugScreen
@@ -46,7 +47,11 @@ private val bottomTabs = listOf(Screen.Apps, Screen.Chat, Screen.Stats)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppNavigation(chatRequestId: Int = 0) {
+fun AppNavigation(
+    chatRequestId: Int = 0,
+    blockedApp: BlockedApp? = null,
+    onReturnToApp: (BlockedApp) -> Unit = {},
+) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
@@ -169,6 +174,8 @@ fun AppNavigation(chatRequestId: Int = 0) {
                 ChatScreen(
                     viewModel = chatViewModel,
                     embedded = true,
+                    blockedApp = blockedApp,
+                    onReturnToApp = onReturnToApp,
                 )
             }
             composable(Screen.Stats.route) { StatsScreen() }

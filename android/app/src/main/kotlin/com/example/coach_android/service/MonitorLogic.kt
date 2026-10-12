@@ -181,7 +181,7 @@ class MonitorLogic(
                     // start the chat, then drop it so it can't cover the chat.
                     withContext(Dispatchers.Main) {
                         overlayManager?.showLaunchCover()
-                        launchForcedChat()
+                        launchForcedChat(packageName)
                         overlayManager?.hide()
                     }
                     // A blocked watched-app open is a temptation.
@@ -204,22 +204,25 @@ class MonitorLogic(
         scope.launch {
             withContext(Dispatchers.Main) {
                 overlayManager?.showLaunchCover()
-                launchForcedChat()
+                launchForcedChat(packageName)
                 overlayManager?.hide()
             }
         }
     }
 
     // The wall is the main activity on its chat tab, not a bare chat screen:
-    // the bottom bar stays, so the rest of the app is one tap away even while
-    // the coach is being argued with.
-    private fun launchForcedChat() {
+    // the bottom bar stays, so the rest of the app is one tap away while the
+    // coach asks what the app is for. The walled app rides along, so the
+    // coach can name it and the OK can return to it.
+    private fun launchForcedChat(packageName: String) {
         val ctx = applicationContext ?: return
         val intent =
             Intent(ctx, MainActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 putExtra(MainActivity.EXTRA_OPEN_CHAT, true)
                 putExtra(MainActivity.EXTRA_FORCED, true)
+                putExtra(MainActivity.EXTRA_BLOCKED_PACKAGE, packageName)
+                putExtra(MainActivity.EXTRA_BLOCKED_LABEL, appLabel(ctx, packageName))
             }
         try {
             ctx.startActivity(intent)
@@ -227,6 +230,17 @@ class MonitorLogic(
             Log.e(tag, "Failed to launch the chat wall: ${e.message}")
         }
     }
+
+    private fun appLabel(
+        ctx: Context,
+        packageName: String,
+    ): String =
+        try {
+            val pm = ctx.packageManager
+            pm.getApplicationInfo(packageName, 0).loadLabel(pm).toString()
+        } catch (_: Exception) {
+            packageName
+        }
 
     // --- Rule Checking ---
 
@@ -336,12 +350,13 @@ class MonitorLogic(
         }
     }
 
-    fun takeOverride(reason: String) {
-        webSocketService.sendOverride(reason)
-    }
-
-    fun takeShortUnblock() {
-        webSocketService.sendShortUnblock()
+    fun release(
+        durationSeconds: Int,
+        reason: String,
+        agentMessage: String,
+        source: String,
+    ) {
+        webSocketService.sendRelease(durationSeconds, reason, agentMessage, source)
     }
 
     fun reloadMonitoredPackages() {

@@ -138,37 +138,6 @@ func TestRestoreAgentLockFromPastTimeIsNoOp(t *testing.T) {
 	}
 }
 
-func TestAgentLockReleaseEndpoint(t *testing.T) {
-	server := &Server{State: &State{}}
-
-	req := httptest.NewRequest(http.MethodPost, "/agent-lock/release", strings.NewReader("duration=300"))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rr := httptest.NewRecorder()
-	server.AgentLockHandler(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("Expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if agentLocked(server.State) {
-		t.Error("State should be released after /release")
-	}
-}
-
-func TestAgentLockReleaseRejectsBadDuration(t *testing.T) {
-	server := &Server{State: &State{}}
-
-	cases := []string{"", "0", "-5", "abc"}
-	for _, body := range cases {
-		req := httptest.NewRequest(http.MethodPost, "/agent-lock/release", strings.NewReader("duration="+body))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		rr := httptest.NewRecorder()
-		server.AgentLockHandler(rr, req)
-		if rr.Code != http.StatusBadRequest {
-			t.Errorf("duration=%q should be 400, got %d", body, rr.Code)
-		}
-	}
-}
-
 func TestAgentLockEngageEndpoint(t *testing.T) {
 	server := &Server{State: &State{}}
 	server.State.ReleaseAgentLock(5 * time.Second)

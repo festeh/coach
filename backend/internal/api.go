@@ -3,8 +3,10 @@ package coach
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"coach/internal/db"
@@ -17,14 +19,24 @@ import (
 // The message types the control WebSocket accepts, one vocabulary for the
 // switch below and for anyone reading what the clients may say.
 const (
-	wsGetFocusing  = "get_focusing"
-	wsFocus        = "focus"
-	wsAttention    = "attention"
-	wsTemptation   = "temptation"
-	wsOverride     = "override"
-	wsShortUnblock = "short_unblock"
-	wsPing         = "ping"
+	wsGetFocusing = "get_focusing"
+	wsFocus       = "focus"
+	wsAttention   = "attention"
+	wsTemptation  = "temptation"
+	wsRelease     = "release"
+	wsPing        = "ping"
 )
+
+// Where an OK came from: the coach's reply in the chat, or the client's own
+// stand-in when the chat could not answer.
+const (
+	releaseSourceChat     = "chat"
+	releaseSourceFallback = "fallback"
+)
+
+// MaxReleaseSeconds bounds one release. The coach offers at most 30 minutes;
+// the bound keeps a confused client from opening the lock for a day.
+const MaxReleaseSeconds = 30 * 60
 
 // writeJSON marshals data to JSON and writes it to the response with proper headers
 func writeJSON(w http.ResponseWriter, data any) error {
@@ -118,17 +130,14 @@ func (s *Server) FocusHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.State.GetCurrentFocusInfo())
 }
 
-// @Summary Get or release/engage the agent lock
-// @Description GET returns current agent-lock state. POST /agent-lock/release with form
-// @Description duration=N (seconds) releases the lock for N seconds (extends if longer
-// @Description than current release). POST /agent-lock/engage cancels any active release.
+// @Summary Get or engage the agent lock
+// @Description GET returns current agent-lock state. POST /agent-lock/engage cancels
+// @Description any active release. Releases arrive over the WebSocket as "release".
 // @Tags agent-lock
 // @Produce json
 // @Success 200 {object} AgentLockInfo
-// @Failure 400 {string} string "Bad request"
 // @Failure 405 {string} string "Method not allowed"
 // @Router /agent-lock [get]
-// @Router /agent-lock/release [post]
 // @Router /agent-lock/engage [post]
 func (s *Server) AgentLockHandler(w http.ResponseWriter, r *http.Request) {
 	log.Info("Called /agent-lock", "method", r.Method, "path", r.URL.Path)
@@ -139,36 +148,6 @@ func (s *Server) AgentLockHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, s.State.GetAgentLockInfo())
-
-	case "/agent-lock/release":
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "Failed to parse form", http.StatusBadRequest)
-			return
-		}
-		duration, err := strconv.Atoi(r.FormValue("duration"))
-		if err != nil || duration <= 0 {
-			http.Error(w, "duration must be a positive integer (seconds)", http.StatusBadRequest)
-			return
-		}
-		s.State.ReleaseAgentLock(time.Duration(duration) * time.Second)
-
-		// Journal the decision. The override flag lives only on the wire; the
-		// stored kind carries it.
-		kind := db.DecisionGrant
-		if r.FormValue("is_override") == "true" {
-			kind = db.DecisionOverride
-			// Counts toward the day's escalation like a WebSocket override would.
-			// This road does not arm or wait: it belongs to the agent, whose
-			// authority over the lock is not the user's budget.
-			s.State.RecordOverride()
-		}
-		s.logLockDecision(kind, r.FormValue("user_message"), r.FormValue("agent_message"), duration)
-
 		writeJSON(w, s.State.GetAgentLockInfo())
 
 	case "/agent-lock/engage":
@@ -191,14 +170,32 @@ func (s *Server) AgentLockHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// release opens the lock for an OK the user clicked and journals the reason
+// with the coach's reply. It refuses only malformed requests: the coach has
+// already heard the reason, and the fallback has no one to ask.
+func (s *Server) release(durationSeconds int, reason, agentMessage, source string) error {
+	if durationSeconds <= 0 || durationSeconds > MaxReleaseSeconds {
+		return fmt.Errorf("duration must be 1..%d seconds, got %d", MaxReleaseSeconds, durationSeconds)
+	}
+	if strings.TrimSpace(reason) == "" {
+		return fmt.Errorf("release needs the reason the user gave")
+	}
+	if source != releaseSourceChat && source != releaseSourceFallback {
+		return fmt.Errorf("unknown release source %q", source)
+	}
+	s.State.ReleaseAgentLock(time.Duration(durationSeconds) * time.Second)
+	s.logLockDecision(db.DecisionGrant, source, reason, agentMessage, durationSeconds)
+	return nil
+}
+
 // logLockDecision writes a decision row, best-effort and asynchronous. A failure
 // (or a missing DB in tests) loses the journal row, never the lock action.
-func (s *Server) logLockDecision(kind, userMessage, agentMessage string, durationSeconds int) {
+func (s *Server) logLockDecision(kind, source, userMessage, agentMessage string, durationSeconds int) {
 	if s.DBManager == nil {
 		return
 	}
 	go func() {
-		if err := s.DBManager.InsertLockDecision(kind, "agent", userMessage, agentMessage, durationSeconds); err != nil {
+		if err := s.DBManager.InsertLockDecision(kind, source, userMessage, agentMessage, durationSeconds); err != nil {
 			log.Error("Failed to journal lock decision", "kind", kind, "error", err)
 		}
 	}()
@@ -218,7 +215,7 @@ func (s *Server) logTemptation(source, target string) {
 }
 
 // writeLockState answers GET /agent-lock/state from today's journal: total
-// released seconds, override count, and the most recent decisions.
+// released seconds, temptations, and the most recent decisions.
 func (s *Server) writeLockState(w http.ResponseWriter) {
 	type recentEntry struct {
 		At              string `json:"at"`
@@ -228,12 +225,10 @@ func (s *Server) writeLockState(w http.ResponseWriter) {
 		DurationSeconds int    `json:"duration_seconds"`
 	}
 	out := struct {
-		ReleasedSecondsToday int            `json:"released_seconds_today"`
-		OverrideCountToday   int            `json:"override_count_today"`
-		TemptationCountToday int            `json:"temptation_count_today"`
-		Override             OverrideStatus `json:"override"`
-		Recent               []recentEntry  `json:"recent"`
-	}{Override: s.State.OverrideStatus(), Recent: []recentEntry{}}
+		ReleasedSecondsToday int           `json:"released_seconds_today"`
+		TemptationCountToday int           `json:"temptation_count_today"`
+		Recent               []recentEntry `json:"recent"`
+	}{Recent: []recentEntry{}}
 
 	if s.DBManager == nil {
 		writeJSON(w, out)
@@ -256,11 +251,8 @@ func (s *Server) writeLockState(w http.ResponseWriter) {
 	}
 
 	for _, d := range decisions {
-		if d.Kind == db.DecisionGrant || d.Kind == db.DecisionOverride || d.Kind == db.DecisionShortUnblock {
+		if db.IsRelease(d.Kind) {
 			out.ReleasedSecondsToday += d.DurationSeconds
-		}
-		if d.Kind == db.DecisionOverride {
-			out.OverrideCountToday++
 		}
 	}
 
@@ -281,45 +273,6 @@ func (s *Server) writeLockState(w http.ResponseWriter) {
 	}
 
 	writeJSON(w, out)
-}
-
-// @Summary Record a lock denial
-// @Description The coach agent posts here when it refuses a release request.
-// @Description Grants, overrides, and engages go through the lock endpoints
-// @Description that actually change state; this endpoint is denials only.
-// @Tags agent-lock
-// @Accept json
-// @Produce json
-// @Success 200 {object} map[string]bool
-// @Failure 400 {string} string "Bad request"
-// @Failure 405 {string} string "Method not allowed"
-// @Router /lock-decisions [post]
-func (s *Server) LockDecisionsHandler(w http.ResponseWriter, r *http.Request) {
-	log.Info("Called /lock-decisions", "method", r.Method)
-
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var body struct {
-		Kind         string `json:"kind"`
-		UserMessage  string `json:"user_message"`
-		AgentMessage string `json:"agent_message"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
-		return
-	}
-	// Kind is implied: this endpoint only records denials. A caller setting
-	// kind is confused about what this endpoint does.
-	if body.Kind != "" {
-		http.Error(w, "kind is not accepted here; this endpoint records denials only", http.StatusBadRequest)
-		return
-	}
-
-	s.logLockDecision(db.DecisionDenial, body.UserMessage, body.AgentMessage, 0)
-	writeJSON(w, map[string]bool{"ok": true})
 }
 
 // @Summary Get unlock stats
@@ -536,6 +489,8 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 			Source   string `json:"source,omitempty"`
 			Target   string `json:"target,omitempty"`
 			Message  string `json:"message,omitempty"`
+			// AgentMessage is the coach's reply that carried the OK.
+			AgentMessage string `json:"agent_message,omitempty"`
 		}
 
 		if err := json.Unmarshal(buf, &message); err != nil {
@@ -570,34 +525,12 @@ func (s *Server) WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 			} else {
 				s.logTemptation(message.Source, message.Target)
 			}
-		case wsOverride:
-			// One button, one message, whatever the phase: the first click of the
-			// day grants 15 minutes outright, later clicks arm a countdown that
-			// grows by 30s per redeemed override, and a click on a ripe request
-			// redeems it. The wait runs from the click, never in the background.
-			_, outcome, reason := s.State.TakeOverride(message.Message)
-			switch outcome {
-			case OverrideGranted:
-				// ReleaseAgentLock already broadcast the new state to every client.
-				s.logLockDecision(db.DecisionOverride, reason, "", OverrideSeconds)
-			case OverrideArmed:
-				// The countdown is shared state: every client shows it ticking.
-				s.logLockDecision(db.DecisionOverrideArmed, reason, "", 0)
-				go s.State.NotifyAllClients(s.State.GetCurrentFocusInfo())
-			case OverrideCooling:
-				// Nothing changed; refresh the clicker so its display is honest.
-				if err := s.State.NotifySingleClient(conn, s.State.GetCurrentFocusInfo()); err != nil {
-					log.Error("Failed to send focus state to client", "err", err)
-				}
-			case OverrideNeedsReason:
-				log.Warn("Override without a reason ignored")
+		case wsRelease:
+			// The user clicked OK. The broadcast from ReleaseAgentLock tells
+			// every client, the clicker included, that the lock is open.
+			if err := s.release(message.Duration, message.Message, message.AgentMessage, message.Source); err != nil {
+				log.Warn("Invalid release", "err", err)
 			}
-
-		case wsShortUnblock:
-			// The peek: 30 seconds, no reason asked, never refused. Not journalled
-			// as an override, so it neither escalates nor answers an armed request.
-			s.State.TakeShortUnblock()
-			s.logLockDecision(db.DecisionShortUnblock, "", "", ShortUnblockSeconds)
 		case wsPing:
 			// "type" is what current clients match on; "response" is kept for
 			// backwards compatibility with older clients.

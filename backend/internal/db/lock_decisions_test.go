@@ -81,3 +81,16 @@ func TestBucketUnlockDaysIgnoresRowsOutsideWindow(t *testing.T) {
 		}
 	}
 }
+
+func TestIsReleaseCountsOlderKindsButNotDenials(t *testing.T) {
+	for _, kind := range []string{DecisionGrant, "override", "short_unblock"} {
+		if !IsRelease(kind) {
+			t.Errorf("%q took the lock off and should count", kind)
+		}
+	}
+	for _, kind := range []string{"denial", "override_armed", ""} {
+		if IsRelease(kind) {
+			t.Errorf("%q never took the lock off and should not count", kind)
+		}
+	}
+}

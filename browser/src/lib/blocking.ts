@@ -67,6 +67,16 @@ export function hostnameOf(url: string): string {
   }
 }
 
+// Where the chat page sends the user back once the lock opens. The redirect
+// carries the full URL, so returning lands on the page that was asked for,
+// not just its site. Only web pages come back out: anything else is ignored.
+export function blockedTargetOf(search: string): { url: string; host: string } | null {
+  const url = new URLSearchParams(search).get("blocked") ?? "";
+  if (!/^https?:\/\//.test(url)) return null;
+  const host = hostnameOf(url);
+  return host ? { url, host } : null;
+}
+
 export async function blockPage(options: BlockOptions): Promise<BlockResult> {
   const notBlocked: BlockResult = { blocked: false, target: "" };
   const { tabId, url } = options;
@@ -83,7 +93,7 @@ export async function blockPage(options: BlockOptions): Promise<BlockResult> {
     if (!isCurrent() || !(await shouldBlock(url)) || !isCurrent()) return notBlocked;
 
     const target = hostnameOf(url);
-    const chatUrl = `${browser.runtime.getURL('/chat.html')}?blocked=${encodeURIComponent(target)}`;
+    const chatUrl = `${browser.runtime.getURL('/chat.html')}?blocked=${encodeURIComponent(url)}`;
     try {
       await browser.tabs.update(tabId, { url: chatUrl });
       return { blocked: true, target };

@@ -12,6 +12,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import com.example.coach_android.ui.chat.BlockedApp
 import com.example.coach_android.ui.navigation.AppNavigation
 import com.example.coach_android.ui.theme.CoachTheme
 
@@ -24,12 +26,20 @@ class MainActivity : ComponentActivity() {
         // not in a bare chat activity with no way to the rest of the app.
         const val EXTRA_OPEN_CHAT = "EXTRA_OPEN_CHAT"
         const val EXTRA_FORCED = "EXTRA_FORCED"
+
+        // The walled app, so the coach can ask about it by name and the OK
+        // can hand the user back to it.
+        const val EXTRA_BLOCKED_PACKAGE = "EXTRA_BLOCKED_PACKAGE"
+        const val EXTRA_BLOCKED_LABEL = "EXTRA_BLOCKED_LABEL"
     }
 
     // Bumped on every launch that asks for the chat tab; AppNavigation watches
     // it. A counter, not a flag, so a second wall re-navigates even when the
     // first request is still the current one.
     private val chatRequests = mutableIntStateOf(0)
+
+    // The app behind the current wall; null when the chat was opened by hand.
+    private val blockedApp = mutableStateOf<BlockedApp?>(null)
 
     // A forced wall must not let back fall through to the blocked app right
     // underneath — that would bounce straight into another block. Send the
@@ -66,13 +76,20 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             CoachTheme {
-                AppNavigation(chatRequestId = chatRequests.intValue)
+                AppNavigation(
+                    chatRequestId = chatRequests.intValue,
+                    blockedApp = blockedApp.value,
+                    onReturnToApp = ::returnToApp,
+                )
             }
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // Kept as the activity's intent so a recreation replays this launch,
+        // not a wall the user has since left.
+        setIntent(intent)
         handleLaunchIntent(intent)
     }
 
@@ -82,6 +99,28 @@ class MainActivity : ComponentActivity() {
         }
         if (intent?.getBooleanExtra(EXTRA_FORCED, false) == true) {
             forcedBack.isEnabled = true
+        }
+        blockedApp.value =
+            intent?.getStringExtra(EXTRA_BLOCKED_PACKAGE)?.let { packageName ->
+                BlockedApp(packageName, intent.getStringExtra(EXTRA_BLOCKED_LABEL) ?: packageName)
+            }
+    }
+
+    // The OK let the user in: the wall is over, so back is ordinary again and
+    // the app they came for goes on top.
+    private fun returnToApp(app: BlockedApp) {
+        blockedApp.value = null
+        forcedBack.isEnabled = false
+        setIntent(Intent(this, MainActivity::class.java))
+        val launch = packageManager.getLaunchIntentForPackage(app.packageName)
+        if (launch == null) {
+            Log.w(TAG, "No launch intent for ${app.packageName}")
+            return
+        }
+        try {
+            startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to return to ${app.packageName}", e)
         }
     }
 
