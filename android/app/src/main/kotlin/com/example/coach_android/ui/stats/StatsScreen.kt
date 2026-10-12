@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -50,7 +51,10 @@ import java.util.Locale
 import kotlin.math.max
 
 @Composable
-fun StatsScreen(viewModel: StatsViewModel = viewModel()) {
+fun StatsScreen(
+    viewModel: StatsViewModel = viewModel(),
+    onOpenReleases: () -> Unit = {},
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     DisposableEffect(viewModel) {
@@ -90,6 +94,7 @@ fun StatsScreen(viewModel: StatsViewModel = viewModel()) {
             item { MetricGrid(state) }
             item { ActivityChart(state.days) }
             item { TemptingAppsCard(state.temptingApps) }
+            item { ReleasesLink(onClick = onOpenReleases) }
 
             state.error?.let { message ->
                 item {
@@ -446,6 +451,41 @@ private fun TemptingAppsCard(apps: List<TemptingApp>) {
                     }
                 }
             }
+        }
+    }
+}
+
+// Into the release journal: every reason given and the coach's reply, as far
+// back as it goes.
+@Composable
+private fun ReleasesLink(onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Releases",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "Every reason you gave and what the coach said",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

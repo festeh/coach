@@ -28,6 +28,7 @@ import com.example.coach_android.ui.chat.ChatScreen
 import com.example.coach_android.ui.chat.ChatViewModel
 import com.example.coach_android.ui.debug.DebugScreen
 import com.example.coach_android.ui.logs.LogsScreen
+import com.example.coach_android.ui.releases.ReleasesScreen
 import com.example.coach_android.ui.settings.SettingsScreen
 import com.example.coach_android.ui.stats.StatsScreen
 
@@ -107,6 +108,7 @@ fun AppNavigation(
                                 "settings" -> "Settings"
                                 "debug" -> "Debug"
                                 "logs" -> "Logs"
+                                "releases" -> "Releases"
                                 else -> ""
                             },
                         )
@@ -178,7 +180,14 @@ fun AppNavigation(
                     onReturnToApp = onReturnToApp,
                 )
             }
-            composable(Screen.Stats.route) { StatsScreen() }
+            composable(Screen.Stats.route) {
+                StatsScreen(
+                    onOpenReleases = {
+                        navController.navigate("releases") { launchSingleTop = true }
+                    },
+                )
+            }
+            composable("releases") { ReleasesScreen() }
             composable("settings") { SettingsScreen() }
             composable("debug") {
                 DebugScreen(
