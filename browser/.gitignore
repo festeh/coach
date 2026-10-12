@@ -31,3 +31,6 @@ dist
 
 # regenerated on every build by wxt.config.ts
 public/build.json
+
+# Personal whitelist files belong in ~/.local/share/coach.
+public/whitelist-*.txt

@@ -12,11 +12,12 @@
     "build:all": "wxt build -b chrome && wxt zip -b firefox",
     "zip": "wxt zip -b chrome",
     "zip:firefox": "wxt zip -b firefox",
-    "install:chrome": "wxt build -b chrome && ln -sf ../../public/whitelist-chrome.txt dist/chrome-mv3/whitelist-chrome.txt",
+    "install:chrome": "wxt build -b chrome",
     "install:firefox": "wxt zip -b firefox && cp dist/coach-${npm_package_version}-firefox.zip ~/.mozilla/firefox/*.dev-edition-default/extensions/coach@dimalip.in.xpi",
     "install:browsers": "npm run install:firefox && npm run install:chrome",
     "install:host": "bash scripts/install-native-host.sh",
     "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "tsx --test tests/*.test.ts",
     "icons": "tsx scripts/generate-icons.ts",
     "postinstall": "wxt prepare"
   },

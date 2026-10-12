@@ -1,4 +1,4 @@
-import { blockPage, hostnameOf, type BlockResult } from "@/lib/blocking";
+import { blockPage, cancelPendingBlock, forgetTab, hostnameOf, noteTabCreated, type BlockResult } from "@/lib/blocking";
 import { recordVisit } from "@/lib/visits";
 import { hostReadWhitelist, hostReadBuildStamp } from "@/lib/nativeHost";
 import {
@@ -19,6 +19,11 @@ const SOURCE = browserSource();
 let wsManager: WebSocketManager;
 
 function setupBrowserListeners(): void {
+  browser.tabs.onCreated.addListener(tab => {
+    if (tab.id !== undefined) noteTabCreated(tab.id);
+  });
+  browser.tabs.onRemoved.addListener(forgetTab);
+
   browser.runtime.onMessage.addListener((message: ExtensionMessage) => {
     switch (message.type) {
       case "get_connection": {
@@ -52,7 +57,9 @@ function setupBrowserListeners(): void {
 
   browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
     const { tabId, url, frameId } = details;
-    if (!url || !url.startsWith("http") || frameId !== 0) {
+    if (frameId !== 0) return;
+    if (!url || !url.startsWith("http")) {
+      cancelPendingBlock(tabId);
       return;
     }
 
@@ -65,7 +72,11 @@ function setupBrowserListeners(): void {
     if (!tabId) return;
 
     const { url } = changeInfo;
-    if (!url || !url.startsWith("http")) return;
+    if (!url) return;
+    if (!url.startsWith("http")) {
+      cancelPendingBlock(tabId);
+      return;
+    }
 
     const result = await blockPage({ url, tabId });
     void recordVisit(hostnameOf(url), result.blocked);
@@ -133,8 +144,8 @@ function cancelPendingDisconnect(): void {
   }
 }
 
-// The whitelist lives in a per-browser text file (public/whitelist-<browser>.txt
-// in the repo), one hostname per line, # for comments. The file is the source
+// The whitelist lives in ~/.local/share/coach/whitelist-<browser>.txt,
+// one hostname per line, # for comments. The file is the source
 // of truth: whenever its parsed content differs from storage, storage is
 // replaced. Preferred read is the native host, which sees the live file on
 // disk — on Firefox that's fresher than the copy frozen into the xpi. Without
