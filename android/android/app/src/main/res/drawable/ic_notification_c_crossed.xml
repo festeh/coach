@@ -1,0 +1,24 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- Original C shape -->
+    <path
+        android:strokeColor="@android:color/white"
+        android:strokeWidth="3"
+        android:fillColor="@android:color/transparent"
+        android:strokeLineCap="round"
+        android:pathData="M12,5C8.13,5 5,8.13 5,12s3.13,7 7,7c1.93,0 3.68,-0.79 4.95,-2.05M17,7.05C15.68,5.79 13.93,5 12,5"/>
+
+    <!-- Diagonal cross lines -->
+    <path
+        android:strokeColor="@android:color/white"
+        android:strokeWidth="3"
+        android:pathData="M5,5L18,19"/>
+    <path
+        android:strokeColor="@android:color/white"
+        android:strokeWidth="3"
+        android:pathData="M5,19L18,5"/>
+</vector>
