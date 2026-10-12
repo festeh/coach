@@ -1,21 +1,9 @@
-.aider*
-state.json
+# Local configuration and generated output
 .env
-main
-
-# Build artifacts
-coach
+.aider*
+build/
+*.log
 *.test
 *.out
-build/
-
-# Secrets
-inventory.ini
-secrets.yml
-
-# Admin frontend
-admin/dist/
-admin/node_modules/
-
-# Claude Code
-.claude/
+.DS_Store
+/.claude/

@@ -2,17 +2,17 @@ set dotenv-load
 
 default: run
 
-home := env('HOME')
-pcloud := home / 'pCloudDrive'
+coach_user_dir := env('HOME')
+pcloud := coach_user_dir / 'pCloudDrive'
 apk_dir := env('COACH_APK_DIR', pcloud / 'Personal/AndroidApps/coach')
 
 # A stable LTS the whole toolchain supports (Gradle 8.10 / AGP 8.8 / Kotlin
 # 2.1), not the Android Studio JBR: that one trails the IDE package — it
 # jumped to Java 25, which this Kotlin's version parser refuses to accept —
 # and Arch's /usr/lib/jvm/default (26) is no better.
-java_home := env('COACH_JAVA_HOME', home / '.local/share/mise/installs/java/temurin-21')
+java_home := env('COACH_JAVA_HOME', coach_user_dir / '.local/share/mise/installs/java/temurin-21')
 
-gradle := "JAVA_HOME=" + java_home + " WEBSOCKET_URL=${WEBSOCKET_URL:-} AGENTS_URL=${AGENTS_URL:-} COACH_API_TOKEN=${COACH_API_TOKEN:-} ./android/gradlew -p android"
+gradle := "JAVA_HOME=" + java_home + " WEBSOCKET_URL=${WEBSOCKET_URL:-} AGENTS_URL=${AGENTS_URL:-} COACH_API_TOKEN=${COACH_API_TOKEN:-} ./gradlew"
 
 run:
     {{gradle}} :app:assembleDebug

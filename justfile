@@ -1,18 +1,25 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-# Run the local server using DATABASE_URL from the caller's environment.
-dev:
-    cd admin && npm run build
-    go run ./cmd/coach
+alias dev := backend-dev
+alias test := backend-test
+alias build := backend-build
+alias clean := backend-clean
 
-# Run backend tests and frontend type/security checks.
-test:
-    go test ./...
-    cd admin && npm ci && npm run check && npm audit --audit-level=low
+# Run the Go backend and build its embedded admin interface.
+backend-dev:
+    just --justfile backend/justfile dev
 
-# Build and package the immutable Linux production release.
-build:
-    ./scripts/build-release
+# Run backend tests and admin type/security checks.
+backend-test:
+    just --justfile backend/justfile test
+
+# Package the backend production release.
+backend-build:
+    just --justfile backend/justfile build
+
+# Remove generated backend dependencies and release artifacts.
+backend-clean:
+    just --justfile backend/justfile clean
 
 # Run the Chrome extension development build.
 browser-dev:
@@ -37,7 +44,3 @@ wear-check:
 # Build the Wear release APK without installing it.
 wear-build:
     just --justfile wear/justfile build
-
-# Remove generated backend dependencies and release artifacts.
-clean:
-    rm -rf admin/node_modules admin/dist build

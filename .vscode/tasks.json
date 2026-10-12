@@ -4,10 +4,9 @@
     {
       "label": "build",
       "type": "shell",
-      "command": "go",
+      "command": "just",
       "args": [
-        "build",
-        "."
+        "backend-build"
       ],
       "group": {
         "kind": "build",

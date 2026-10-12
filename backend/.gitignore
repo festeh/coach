@@ -1,0 +1,21 @@
+.aider*
+state.json
+.env
+/main
+
+# Build artifacts
+/coach
+*.test
+*.out
+build/
+
+# Secrets
+inventory.ini
+secrets.yml
+
+# Admin frontend
+admin/dist/
+admin/node_modules/
+
+# Claude Code
+.claude/

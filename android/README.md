@@ -1,11 +1,10 @@
 # Coach Android
 
-Native Kotlin and Jetpack Compose client. The Gradle project lives in
-`android/` relative to this directory; Flutter is not required.
+Native Kotlin and Jetpack Compose client. This directory is the Gradle
+project root; Flutter is not required.
 
-Use Java 21, an Android SDK, and the Gradle wrapper described in
-[migration notes](../docs/monorepo.md). Put `sdk.dir` in the ignored
-`android/local.properties` file and configure `WEBSOCKET_URL`, `AGENTS_URL`,
+Use Java 21, an Android SDK, and the included Gradle wrapper. Put `sdk.dir`
+in the ignored `local.properties` file and configure `WEBSOCKET_URL`, `AGENTS_URL`,
 and `COACH_API_TOKEN` in this directory's ignored `.env` file.
 
 From this directory, `just build-release` builds the release APK. `just run`

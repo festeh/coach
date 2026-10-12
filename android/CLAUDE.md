@@ -39,7 +39,8 @@ just build-release
 just install-release
 ```
 
-Requires `JAVA_HOME=/opt/android-studio/jbr` (handled by justfile).
+Requires Java 21 (handled by the justfile). Set `COACH_JAVA_HOME` to use a
+different Java 21 installation.
 
 WebSocket URL configured via `.env` file with `WEBSOCKET_URL` variable (read from manifest meta-data at runtime).
 
@@ -52,9 +53,9 @@ WebSocket URL configured via `.env` file with `WEBSOCKET_URL` variable (read fro
 
 ## Key Files
 
-1. `android/app/src/main/kotlin/.../service/MonitorLogic.kt` — Core focus logic
-2. `android/app/src/main/kotlin/.../FocusMonitorService.kt` — Background service
-3. `android/app/src/main/kotlin/.../OverlayManager.kt` — System overlay builder
-4. `android/app/src/main/kotlin/.../data/websocket/WebSocketService.kt` — WebSocket client
-5. `android/app/src/main/kotlin/.../data/preferences/PreferencesManager.kt` — All SharedPreferences access
-6. `android/app/src/main/kotlin/.../ui/navigation/AppNavigation.kt` — App navigation
+1. `app/src/main/kotlin/.../service/MonitorLogic.kt` — Core focus logic
+2. `app/src/main/kotlin/.../FocusMonitorService.kt` — Background service
+3. `app/src/main/kotlin/.../OverlayManager.kt` — System overlay builder
+4. `app/src/main/kotlin/.../data/websocket/WebSocketService.kt` — WebSocket client
+5. `app/src/main/kotlin/.../data/preferences/PreferencesManager.kt` — All SharedPreferences access
+6. `app/src/main/kotlin/.../ui/navigation/AppNavigation.kt` — App navigation
