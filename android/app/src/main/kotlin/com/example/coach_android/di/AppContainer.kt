@@ -15,7 +15,7 @@ class AppContainer(
     apiToken: String = "",
 ) {
     val preferencesManager = PreferencesManager(context)
-    val database = UsageDatabase.create(context)
+    val database = UsageDatabase.getInstance(context)
     val eventDao = database.eventDao()
     val ruleCounterDao = database.ruleCounterDao()
 

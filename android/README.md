@@ -14,3 +14,7 @@ than the default mise location used by the justfile.
 
 From the repository root, `just android-build` builds the release APK in
 `android/build/app/outputs/apk/release/`.
+
+Run `just android-test` from the repository root, or `just test` here, for
+JVM tests of the focus socket protocol and reconnection behavior. These
+tests do not require a device or emulator.

@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { readFileSync, mkdirSync } from "fs";
+import { readFileSync } from "fs";
 import { join } from "path";
 
 const STATES = ["active", "inactive", "disconnected"] as const;

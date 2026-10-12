@@ -10,9 +10,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.*
-import java.util.concurrent.TimeUnit
-import kotlin.math.min
-import kotlin.math.pow
 
 class WebSocketService(
     private val url: String,
@@ -21,20 +18,14 @@ class WebSocketService(
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    private val client =
-        OkHttpClient
-            .Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.MINUTES) // no read timeout for WebSocket
-            .build()
+    private val client = WebSocketTransport.client
 
     private var webSocket: WebSocket? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private var isConnected = false
     private var isConnecting = false
-    private var reconnectAttempts = 0
-    private var reconnectJob: Job? = null
+    private val reconnect = ReconnectScheduler(scope, BASE_RECONNECT_DELAY_MS)
     private var focusQueryJob: Job? = null
 
     private var pendingRequest: CompletableDeferred<Map<String, Any?>>? = null
@@ -46,7 +37,7 @@ class WebSocketService(
         mapOf(
             "isConnected" to isConnected,
             "isConnecting" to isConnecting,
-            "reconnectAttempts" to reconnectAttempts,
+            "reconnectAttempts" to reconnect.attempts,
             // Redacted here rather than at the Debug screen that renders it, so a
             // future reader of this map cannot reintroduce the leak.
             "websocketUrl" to SafeUrl.redacted(url),
@@ -82,7 +73,7 @@ class WebSocketService(
                         Log.i(tag, "WebSocket connected successfully")
                         isConnected = true
                         isConnecting = false
-                        reconnectAttempts = 0
+                        reconnect.reset()
                         startPeriodicFocusQuery()
                     }
 
@@ -170,24 +161,8 @@ class WebSocketService(
     // cost the socket until someone hit Refresh — and the phone can't tell a
     // finished outage from an ongoing one without trying.
     private fun scheduleReconnect() {
-        if (reconnectJob?.isActive == true) return
-
-        reconnectAttempts++
-
-        val delayMs =
-            (
-                BASE_RECONNECT_DELAY_MS *
-                    2.0.pow(min(reconnectAttempts - 1, 6).toDouble())
-            ).toLong() +
-                (0..999).random()
-
-        Log.i(tag, "Scheduling reconnection attempt $reconnectAttempts in ${delayMs / 1000}s")
-
-        reconnectJob =
-            scope.launch {
-                delay(delayMs)
-                connect()
-            }
+        val delayMs = reconnect.schedule { connect() } ?: return
+        Log.i(tag, "Scheduling reconnection attempt ${reconnect.attempts} in ${delayMs / 1000}s")
     }
 
     private fun startPeriodicFocusQuery() {
@@ -272,11 +247,15 @@ class WebSocketService(
                 kotlinx.serialization.json.buildJsonObject {
                     put("type", kotlinx.serialization.json.JsonPrimitive("focus"))
                     if (durationMinutes > 0) {
-                        put("duration", kotlinx.serialization.json.JsonPrimitive(durationMinutes))
+                        // The picker and preferences use minutes; the server's
+                        // focus protocol uses seconds. Convert only at the boundary.
+                        put("duration", kotlinx.serialization.json.JsonPrimitive(durationMinutes.toLong() * 60))
                     }
                 },
             )
-        ws.send(jsonStr)
+        if (!ws.send(jsonStr)) {
+            throw IllegalStateException("WebSocket rejected the message")
+        }
         Log.i(tag, "Focus command sent: $jsonStr")
     }
 
@@ -325,7 +304,7 @@ class WebSocketService(
 
     fun dispose() {
         Log.i(tag, "Disposing WebSocket service")
-        reconnectJob?.cancel()
+        reconnect.reset()
         focusQueryJob?.cancel()
         scope.cancel()
         webSocket?.close(1000, "Disposing")

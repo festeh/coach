@@ -16,13 +16,19 @@ abstract class UsageDatabase : RoomDatabase() {
     abstract fun ruleCounterDao(): RuleCounterDao
 
     companion object {
-        fun create(context: Context): UsageDatabase =
-            Room
-                .databaseBuilder(
-                    context.applicationContext,
-                    UsageDatabase::class.java,
-                    "coach_usage.db",
-                ).fallbackToDestructiveMigration(dropAllTables = true)
-                .build()
+        @Volatile
+        private var instance: UsageDatabase? = null
+
+        fun getInstance(context: Context): UsageDatabase =
+            instance ?: synchronized(this) {
+                instance ?: Room
+                    .databaseBuilder(
+                        context.applicationContext,
+                        UsageDatabase::class.java,
+                        "coach_usage.db",
+                    ).fallbackToDestructiveMigration(dropAllTables = true)
+                    .build()
+                    .also { instance = it }
+            }
     }
 }

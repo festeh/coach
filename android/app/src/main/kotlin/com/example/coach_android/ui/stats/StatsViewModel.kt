@@ -61,7 +61,7 @@ data class StatsUiState(
 class StatsViewModel(
     application: Application,
 ) : AndroidViewModel(application) {
-    private val eventDao: EventDao = UsageDatabase.create(application).eventDao()
+    private val eventDao: EventDao = UsageDatabase.getInstance(application).eventDao()
     private val _state = MutableStateFlow(StatsUiState())
     val state: StateFlow<StatsUiState> = _state.asStateFlow()
 

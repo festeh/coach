@@ -21,6 +21,10 @@ run:
 build-release:
     {{gradle}} :app:assembleRelease
 
+# Run JVM tests for the socket protocol and reconnection behavior.
+test:
+    {{gradle}} :app:testDebugUnitTest
+
 install-release:
     {{gradle}} :app:assembleRelease
     adb install -r $(find build/app/outputs -name "*release*.apk" | head -1)

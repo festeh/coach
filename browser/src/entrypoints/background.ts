@@ -18,6 +18,17 @@ const SOURCE = browserSource();
 
 let wsManager: WebSocketManager;
 
+async function handleNavigation(tabId: number, url: string): Promise<void> {
+  if (!url || !url.startsWith("http")) {
+    cancelPendingBlock(tabId);
+    return;
+  }
+
+  const result = await blockPage({ url, tabId });
+  void recordVisit(hostnameOf(url), result.blocked);
+  void reportIfBlocked(tabId, result);
+}
+
 function setupBrowserListeners(): void {
   browser.tabs.onCreated.addListener(tab => {
     if (tab.id !== undefined) noteTabCreated(tab.id);
@@ -55,32 +66,18 @@ function setupBrowserListeners(): void {
     }
   });
 
-  browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
+  browser.webNavigation.onBeforeNavigate.addListener((details) => {
     const { tabId, url, frameId } = details;
     if (frameId !== 0) return;
-    if (!url || !url.startsWith("http")) {
-      cancelPendingBlock(tabId);
-      return;
-    }
-
-    const result = await blockPage({ url, tabId });
-    void recordVisit(hostnameOf(url), result.blocked);
-    void reportIfBlocked(tabId, result);
+    return handleNavigation(tabId, url);
   });
 
-  browser.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+  browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
     if (!tabId) return;
 
     const { url } = changeInfo;
     if (!url) return;
-    if (!url.startsWith("http")) {
-      cancelPendingBlock(tabId);
-      return;
-    }
-
-    const result = await blockPage({ url, tabId });
-    void recordVisit(hostnameOf(url), result.blocked);
-    void reportIfBlocked(tabId, result);
+    return handleNavigation(tabId, url);
   });
 
   browser.alarms.onAlarm.addListener((alarm) => {

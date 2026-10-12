@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.coach_android.FocusMonitorService
 import com.example.coach_android.data.db.RuleCounterDao
+import com.example.coach_android.data.db.UsageDatabase
 import com.example.coach_android.data.model.AppInfo
 import com.example.coach_android.data.model.AppRule
 import com.example.coach_android.data.model.FocusData
@@ -35,7 +36,9 @@ class AppsViewModel(
     private val _state = MutableStateFlow(AppsUiState())
     val state: StateFlow<AppsUiState> = _state.asStateFlow()
 
-    private var ruleCounterDao: RuleCounterDao? = null
+    private val ruleCounterDao: RuleCounterDao by lazy {
+        UsageDatabase.getInstance(application).ruleCounterDao()
+    }
 
     init {
         loadData()
@@ -109,27 +112,16 @@ class AppsViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val today = TimeFormatter.todayString()
-                val dao = getRuleCounterDao()
-                dao?.resetCounters(rule.id, today)
+                ruleCounterDao.resetCounters(rule.id, today)
                 loadRuleCounters()
             } catch (_: Exception) {
             }
         }
     }
 
-    private fun getRuleCounterDao(): RuleCounterDao? {
-        if (ruleCounterDao != null) return ruleCounterDao
-        // Create a separate DB instance to query counters
-        val db =
-            com.example.coach_android.data.db.UsageDatabase
-                .create(getApplication())
-        ruleCounterDao = db.ruleCounterDao()
-        return ruleCounterDao
-    }
-
     private fun loadRuleCounters() {
         viewModelScope.launch(Dispatchers.IO) {
-            val dao = getRuleCounterDao() ?: return@launch
+            val dao = ruleCounterDao
             val today = TimeFormatter.todayString()
             val counters = mutableMapOf<String, Pair<Int, Int>>()
             for (rule in _state.value.rules.values) {

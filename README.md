@@ -18,7 +18,7 @@ The root justfile provides commands for all four components.
 | --- | --- | --- |
 | [Backend](backend/README.md) | Go from `backend/.go-version`, Node from `backend/admin/.node-version`, PostgreSQL | `just backend-dev`, `just backend-test`, `just backend-build` |
 | [Browser](browser/README.md) | Node and `cd browser && npm ci` | `just browser-dev`, `just browser-test`, `just browser-build` |
-| [Android](android/README.md) | Android SDK and Java 21 | `just android-build` |
+| [Android](android/README.md) | Android SDK and Java 21 | `just android-test`, `just android-build` |
 | [Wear](wear/README.md) | Flutter 3.35.6, Android SDK, Java 21 | `just wear-check`, `just wear-build` |
 
 Keep runtime configuration in each component's ignored `.env` file.

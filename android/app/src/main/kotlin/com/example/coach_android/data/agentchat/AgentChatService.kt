@@ -1,6 +1,8 @@
 package com.example.coach_android.data.agentchat
 
 import android.util.Log
+import com.example.coach_android.data.websocket.ReconnectScheduler
+import com.example.coach_android.data.websocket.WebSocketTransport
 import com.example.coach_android.util.SafeUrl
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -13,14 +15,10 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
-import java.util.concurrent.TimeUnit
-import kotlin.math.min
-import kotlin.math.pow
 
 // Frame kinds on the chat socket — mirror my-agents' WsIn/WsOut enums.
 private object ClientFrame {
@@ -82,19 +80,13 @@ class AgentChatService(
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    private val client =
-        OkHttpClient
-            .Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.MINUTES)
-            .build()
+    private val client = WebSocketTransport.client
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var webSocket: WebSocket? = null
     private var isConnected = false
     private var isConnecting = false
-    private var reconnectAttempts = 0
-    private var reconnectJob: Job? = null
+    private val reconnect = ReconnectScheduler(scope, BASE_RECONNECT_DELAY_MS)
     private var shouldReconnect = false
 
     private val _events = MutableSharedFlow<ChatEvent>(extraBufferCapacity = 32)
@@ -114,13 +106,11 @@ class AgentChatService(
     fun disconnect() {
         Log.i(tag, "Disconnecting agent chat WebSocket")
         shouldReconnect = false
-        reconnectJob?.cancel()
-        reconnectJob = null
+        reconnect.reset()
         webSocket?.close(1000, "Client disconnecting")
         webSocket = null
         isConnected = false
         isConnecting = false
-        reconnectAttempts = 0
     }
 
     fun send(content: String) {
@@ -175,7 +165,7 @@ class AgentChatService(
                 Log.i(tag, "Agent chat connected")
                 isConnected = true
                 isConnecting = false
-                reconnectAttempts = 0
+                reconnect.reset()
                 scope.launch { _events.emit(ChatEvent.Connected) }
             }
 
@@ -251,17 +241,8 @@ class AgentChatService(
     // server restart, with only the error banner's Retry to bring it back.
     private fun scheduleReconnect() {
         if (!shouldReconnect) return
-        if (reconnectJob?.isActive == true) return
-        reconnectAttempts++
-        val delayMs =
-            (BASE_RECONNECT_DELAY_MS * 2.0.pow(min(reconnectAttempts - 1, 6).toDouble())).toLong() +
-                (0..999).random()
-        Log.i(tag, "Agent chat reconnect attempt $reconnectAttempts in ${delayMs / 1000}s")
-        reconnectJob =
-            scope.launch {
-                delay(delayMs)
-                if (shouldReconnect) openSocket()
-            }
+        val delayMs = reconnect.schedule { if (shouldReconnect) openSocket() } ?: return
+        Log.i(tag, "Agent chat reconnect attempt ${reconnect.attempts} in ${delayMs / 1000}s")
     }
 
     fun dispose() {

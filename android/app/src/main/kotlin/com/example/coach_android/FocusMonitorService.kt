@@ -3,7 +3,6 @@ package com.example.coach_android
 import android.app.*
 import android.content.Context
 import android.content.Intent
-import android.os.Binder
 import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
@@ -15,7 +14,6 @@ import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
 
 class FocusMonitorService : Service() {
-    private val binder = FocusMonitorBinder()
     private lateinit var notificationManager: ServiceNotificationManager
     private lateinit var appMonitor: AppMonitorHandler
 
@@ -34,10 +32,6 @@ class FocusMonitorService : Service() {
         private var serviceInstance: FocusMonitorService? = null
 
         fun getInstance(): FocusMonitorService? = serviceInstance
-    }
-
-    inner class FocusMonitorBinder : Binder() {
-        fun getService(): FocusMonitorService = this@FocusMonitorService
     }
 
     override fun onCreate() {
@@ -73,7 +67,7 @@ class FocusMonitorService : Service() {
         return START_STICKY
     }
 
-    override fun onBind(intent: Intent?): IBinder = binder
+    override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         super.onDestroy()

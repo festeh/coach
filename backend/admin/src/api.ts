@@ -49,12 +49,3 @@ export async function fetchAttention(from: Date, to: Date): Promise<AttentionInt
   const res = await fetch(`/attention?${params}`);
   return res.json();
 }
-
-export async function fetchHealth(): Promise<boolean> {
-  try {
-    const res = await fetch("/health");
-    return res.ok;
-  } catch {
-    return false;
-  }
-}

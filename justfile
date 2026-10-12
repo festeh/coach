@@ -37,6 +37,10 @@ browser-build:
 android-build:
     just --justfile android/justfile build-release
 
+# Run Android JVM tests without a device.
+android-test:
+    just --justfile android/justfile test
+
 # Resolve the Wear app's locked dependencies and analyze its Dart sources.
 wear-check:
     cd wear && flutter pub get --enforce-lockfile && flutter analyze
