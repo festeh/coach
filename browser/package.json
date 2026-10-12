@@ -1,0 +1,46 @@
+{
+  "name": "coach",
+  "description": "Your guide to a better focusing",
+  "private": true,
+  "version": "0.1.1",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt -b chrome",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build -b chrome",
+    "build:firefox": "wxt build -b firefox",
+    "build:all": "wxt build -b chrome && wxt zip -b firefox",
+    "zip": "wxt zip -b chrome",
+    "zip:firefox": "wxt zip -b firefox",
+    "install:chrome": "wxt build -b chrome && ln -sf ../../public/whitelist-chrome.txt dist/chrome-mv3/whitelist-chrome.txt",
+    "install:firefox": "wxt zip -b firefox && cp dist/coach-${npm_package_version}-firefox.zip ~/.mozilla/firefox/*.dev-edition-default/extensions/coach@dimalip.in.xpi",
+    "install:browsers": "npm run install:firefox && npm run install:chrome",
+    "install:host": "bash scripts/install-native-host.sh",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "icons": "tsx scripts/generate-icons.ts",
+    "postinstall": "wxt prepare"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.0",
+    "@tsconfig/svelte": "^5.0.8",
+    "@wxt-dev/module-svelte": "^2.0.5",
+    "sharp": "^0.34.5",
+    "svelte": "^5.56.2",
+    "svelte-check": "^4.6.0",
+    "tailwindcss": "^4.3.0",
+    "tslib": "^2.8.1",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "wxt": "^0.20.26"
+  },
+  "dependencies": {
+    "lucide-svelte": "^1.0.1",
+    "partysocket": "^1.1.19",
+    "zod": "^4.4.3"
+  },
+  "overrides": {
+    "tmp": "^0.2.7",
+    "uuid": "^11.1.1"
+  }
+}
