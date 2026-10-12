@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"coach/internal/db"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -156,5 +158,83 @@ func TestUnlockStatsWithoutJournalDoesNotPanic(t *testing.T) {
 
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("Expected 503 without a journal, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func decisionsWithIDs(ids ...int64) []db.LockDecision {
+	rows := make([]db.LockDecision, 0, len(ids))
+	for _, id := range ids {
+		rows = append(rows, db.LockDecision{ID: id, Kind: db.DecisionGrant})
+	}
+	return rows
+}
+
+func TestPageLockDecisionsPointsAtTheOlderPage(t *testing.T) {
+	// limit+1 rows read: the extra one proves an older page exists.
+	page := pageLockDecisions(decisionsWithIDs(9, 8, 7), 2)
+
+	if len(page.Decisions) != 2 || page.Decisions[1].ID != 8 {
+		t.Fatalf("expected ids 9, 8 on the page, got %+v", page.Decisions)
+	}
+	if page.NextBefore == nil || *page.NextBefore != 8 {
+		t.Errorf("next page should start before id 8, got %v", page.NextBefore)
+	}
+}
+
+func TestPageLockDecisionsEndsOnTheLastPage(t *testing.T) {
+	page := pageLockDecisions(decisionsWithIDs(2, 1), 2)
+
+	if len(page.Decisions) != 2 {
+		t.Fatalf("expected both rows, got %+v", page.Decisions)
+	}
+	if page.NextBefore != nil {
+		t.Errorf("the last page has no cursor, got %d", *page.NextBefore)
+	}
+}
+
+func TestEmptyLockDecisionPageEncodesAnEmptyList(t *testing.T) {
+	body, err := json.Marshal(pageLockDecisions(decisionsWithIDs(), 50))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != `{"decisions":[],"next_before":null}` {
+		t.Errorf("unexpected encoding: %s", body)
+	}
+}
+
+func TestLockDecisionsRejectsABrokenCursor(t *testing.T) {
+	server := &Server{State: &State{}}
+
+	for _, before := range []string{"abc", "0", "-3"} {
+		req := httptest.NewRequest(http.MethodGet, "/lock-decisions?before="+before, nil)
+		rr := httptest.NewRecorder()
+		server.LockDecisionsHandler(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("before=%q should be 400, got %d", before, rr.Code)
+		}
+	}
+}
+
+func TestLockDecisionsRejectsNonGet(t *testing.T) {
+	server := &Server{State: &State{}}
+
+	req := httptest.NewRequest(http.MethodPost, "/lock-decisions", nil)
+	rr := httptest.NewRecorder()
+	server.LockDecisionsHandler(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Expected 405, got %d", rr.Code)
+	}
+}
+
+func TestLockDecisionsWithoutJournalDoesNotPanic(t *testing.T) {
+	server := &Server{State: &State{}}
+
+	req := httptest.NewRequest(http.MethodGet, "/lock-decisions?limit=999", nil)
+	rr := httptest.NewRecorder()
+	server.LockDecisionsHandler(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("Expected 503 without a journal, got %d", rr.Code)
 	}
 }

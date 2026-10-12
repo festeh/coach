@@ -1,6 +1,6 @@
 <script lang="ts">
 	import './app.css';
-	import { Settings, MessageCircle, History } from 'lucide-svelte';
+	import { Settings, MessageCircle, History, ScrollText } from 'lucide-svelte';
 	import ConnectionStatus from '../../components/ConnectionStatus.svelte';
 	import FocusStatus from '../../components/FocusStatus.svelte';
 	import UpdateButton from '../../components/UpdateButton.svelte';
@@ -19,6 +19,11 @@
 
 	function openVisits() {
 		browser.tabs.create({ url: browser.runtime.getURL('/visits.html') });
+		window.close();
+	}
+
+	function openReleases() {
+		browser.tabs.create({ url: browser.runtime.getURL('/releases.html') });
 		window.close();
 	}
 </script>
@@ -60,6 +65,18 @@
 			aria-label="Recent visits"
 		>
 			<History size={16} />
+		</button>
+		<button
+			type="button"
+			class="p-2 rounded-lg transition-colors"
+			style:color="var(--color-ink-muted)"
+			onclick={openReleases}
+			onmouseenter={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--color-ink)')}
+			onmouseleave={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--color-ink-muted)')}
+			title="Releases"
+			aria-label="Releases"
+		>
+			<ScrollText size={16} />
 		</button>
 		<UpdateButton iconOnly updateFocus={() => coach.refresh()} />
 	</header>

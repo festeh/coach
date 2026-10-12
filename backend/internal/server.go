@@ -110,6 +110,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/agent-lock", s.AgentLockHandler)
 	mux.HandleFunc("/agent-lock/engage", s.AgentLockHandler)
 	mux.HandleFunc("/agent-lock/state", s.AgentLockHandler)
+	mux.HandleFunc("/lock-decisions", s.LockDecisionsHandler)
 	mux.HandleFunc("/lock-decisions/stats", s.LockDecisionStatsHandler)
 	mux.Handle("/admin/", s.AdminHandler())
 

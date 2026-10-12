@@ -275,6 +275,81 @@ func (s *Server) writeLockState(w http.ResponseWriter) {
 	writeJSON(w, out)
 }
 
+// Release history comes a page at a time: newest first, 50 rows unless the
+// caller asks for more, never more than 200.
+const (
+	defaultLockDecisionPage = 50
+	maxLockDecisionPage     = 200
+)
+
+type lockDecisionPage struct {
+	Decisions []db.LockDecision `json:"decisions"`
+	// NextBefore is the cursor to the next, older page; nil when there is none.
+	NextBefore *int64 `json:"next_before"`
+}
+
+// pageLockDecisions trims a limit+1 read to one page: the extra row only says
+// that an older page exists, and the cursor to it is this page's oldest id.
+func pageLockDecisions(rows []db.LockDecision, limit int) lockDecisionPage {
+	page := lockDecisionPage{Decisions: rows}
+	if len(rows) > limit {
+		page.Decisions = rows[:limit]
+		next := rows[limit-1].ID
+		page.NextBefore = &next
+	}
+	return page
+}
+
+// @Summary List lock decisions
+// @Description Every release (and older override, peek and denial), newest first, a page
+// @Description at a time. Pass a page's next_before as `before` to read further back.
+// @Tags agent-lock
+// @Produce json
+// @Param before query int false "Only decisions older than this id"
+// @Param limit query int false "Page size (default 50, max 200)"
+// @Success 200 {object} lockDecisionPage
+// @Failure 400 {string} string "Bad request"
+// @Router /lock-decisions [get]
+func (s *Server) LockDecisionsHandler(w http.ResponseWriter, r *http.Request) {
+	log.Info("Called /lock-decisions", "method", r.Method)
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// A broken cursor is refused rather than read as "from the top", which
+	// would repeat the newest page under the ones already shown.
+	var before int64
+	if v := r.URL.Query().Get("before"); v != "" {
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || parsed < 1 {
+			http.Error(w, "before must be a positive id", http.StatusBadRequest)
+			return
+		}
+		before = parsed
+	}
+	limit := defaultLockDecisionPage
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 1 {
+			limit = min(parsed, maxLockDecisionPage)
+		}
+	}
+
+	if s.DBManager == nil {
+		http.Error(w, "Journal unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	rows, err := s.DBManager.ListLockDecisions(before, limit+1)
+	if err != nil {
+		log.Error("Failed to list lock decisions", "err", err)
+		http.Error(w, "Failed to list lock decisions", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, pageLockDecisions(rows, limit))
+}
+
 // @Summary Get unlock stats
 // @Description Returns unlocks and unlocked seconds per day for the last N days
 // @Tags agent-lock

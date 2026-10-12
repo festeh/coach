@@ -3,6 +3,8 @@ package db
 import (
 	"slices"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // DecisionGrant is the one kind written now: a release the user took with OK
@@ -21,7 +23,9 @@ func IsRelease(kind string) bool {
 
 // LockDecision is one persisted agent-lock decision.
 type LockDecision struct {
+	ID              int64  `json:"id"`
 	Kind            string `json:"kind"`
+	Source          string `json:"source"`
 	UserMessage     string `json:"user_message"`
 	AgentMessage    string `json:"agent_message"`
 	DurationSeconds int    `json:"duration_seconds"`
@@ -63,7 +67,7 @@ func (m *Manager) GetTodayLockDecisions() ([]LockDecision, error) {
 	defer cancel()
 
 	rows, err := m.pool.Query(ctx, `
-		SELECT kind, user_message, agent_message, duration_seconds, created_at
+		SELECT `+lockDecisionColumns+`
 		FROM lock_decisions
 		WHERE created_at >= $1 AND created_at < $2
 		ORDER BY created_at
@@ -72,14 +76,41 @@ func (m *Manager) GetTodayLockDecisions() ([]LockDecision, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	return scanLockDecisions(rows)
+}
 
+// ListLockDecisions returns up to limit decisions older than beforeID, newest
+// first; a beforeID of 0 starts from the newest. Paging by id rather than by
+// time keeps a page boundary from splitting rows that share a timestamp.
+func (m *Manager) ListLockDecisions(beforeID int64, limit int) ([]LockDecision, error) {
+	ctx, cancel := operationContext()
+	defer cancel()
+
+	rows, err := m.pool.Query(ctx, `
+		SELECT `+lockDecisionColumns+`
+		FROM lock_decisions
+		WHERE $1 = 0 OR id < $1
+		ORDER BY id DESC
+		LIMIT $2
+	`, beforeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return scanLockDecisions(rows)
+}
+
+const lockDecisionColumns = "id, kind, source, user_message, agent_message, duration_seconds, created_at"
+
+func scanLockDecisions(rows pgx.Rows) ([]LockDecision, error) {
+	defer rows.Close()
 	decisions := make([]LockDecision, 0)
 	for rows.Next() {
 		var decision LockDecision
 		var createdAt time.Time
 		if err := rows.Scan(
+			&decision.ID,
 			&decision.Kind,
+			&decision.Source,
 			&decision.UserMessage,
 			&decision.AgentMessage,
 			&decision.DurationSeconds,
