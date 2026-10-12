@@ -1,16 +1,17 @@
-# coach_wear
+# Coach Wear
 
-A new Flutter project.
+Flutter client for Wear OS. Use a Flutter SDK compatible with the Dart
+version in `pubspec.lock`, plus an Android SDK and Java 21.
 
-## Getting Started
+Configure `COACH_ADDR` in this directory's ignored `.env` file, using the
+backend's WebSocket base URL. From this directory, `just debug` runs the
+app, `just build` builds a release APK, and `just release` builds and
+installs it.
 
-This project is a starting point for a Flutter application.
+The build recipe selects Java 21 for Gradle, including when Flutter selects
+a newer Android Studio runtime for its launcher. Set `COACH_JAVA_HOME` if
+Java 21 is installed outside the default mise location.
 
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+From the repository root, `just wear-check` resolves locked dependencies
+and analyzes Dart sources; `just wear-build` builds a release APK in
+`wear/build/app/outputs/flutter-apk/`.

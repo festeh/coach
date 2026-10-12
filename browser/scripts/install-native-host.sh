@@ -6,9 +6,18 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOST="$REPO/scripts/coach-native-host.py"
 NAME="in.dimalip.coach"
-# Chrome derives an unpacked extension's id from its directory; this one is
-# stable as long as the extension loads from $REPO/dist/chrome-mv3.
-CHROME_ID="bkgfmlfpicibookmhogkodnolhcfgfhf"
+# Chrome derives an unpacked extension's id from its absolute directory.
+# Calculate it again when this project moves. An explicitly configured ID
+# also supports installations whose manifest supplies a public key.
+CHROME_ID="${COACH_CHROME_EXTENSION_ID:-$(python3 - "$REPO/dist/chrome-mv3" <<'PY'
+import hashlib
+import os
+import sys
+
+digest = hashlib.sha256(os.path.realpath(sys.argv[1]).encode()).hexdigest()[:32]
+print(''.join(chr(ord('a') + int(nibble, 16)) for nibble in digest))
+PY
+)}"
 
 chmod +x "$HOST"
 

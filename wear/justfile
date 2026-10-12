@@ -22,3 +22,7 @@ release:
         echo "Warning: .env file not found, building and installing without environment variables"
         flutter build apk --release && flutter install --release
     fi
+
+# Build a release APK without installing it on a device.
+build:
+    GRADLE_OPTS="${GRADLE_OPTS:-} -Dorg.gradle.java.home=${COACH_JAVA_HOME:-$HOME/.local/share/mise/installs/java/temurin-21}" flutter build apk --release --dart-define-from-file=.env
