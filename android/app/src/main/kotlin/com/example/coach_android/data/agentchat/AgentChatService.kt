@@ -5,6 +5,7 @@ import com.example.coach_android.data.websocket.ReconnectScheduler
 import com.example.coach_android.data.websocket.WebSocketTransport
 import com.example.coach_android.util.SafeUrl
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -93,8 +94,16 @@ class AgentChatService(
     private val reconnect = ReconnectScheduler(scope, BASE_RECONNECT_DELAY_MS)
     private var shouldReconnect = false
 
-    private val _events = MutableSharedFlow<ChatEvent>(extraBufferCapacity = 32)
+    private val _events = MutableSharedFlow<ChatEvent>(extraBufferCapacity = Channel.UNLIMITED)
     val events: SharedFlow<ChatEvent> = _events.asSharedFlow()
+
+    // Emitted in place, on the caller's thread: OkHttp hands frames over one at
+    // a time, so chunks reach the chat in the order the server sent them. A
+    // coroutine per frame on the IO pool used to reorder them and garble the
+    // streamed reply. The buffer is unbounded, so tryEmit never drops one.
+    private fun emit(event: ChatEvent) {
+        _events.tryEmit(event)
+    }
 
     // Whether a reason sent now would reach the coach. When it wouldn't, the
     // chat lets the user in on its own rather than leaving them walled.
@@ -103,7 +112,7 @@ class AgentChatService(
     fun connect() {
         if (wsUrl.isEmpty()) {
             Log.w(tag, "Agent chat URL not configured")
-            scope.launch { _events.emit(ChatEvent.Error("Agent server URL not configured")) }
+            emit(ChatEvent.Error("Agent server URL not configured"))
             return
         }
         shouldReconnect = true
@@ -130,7 +139,7 @@ class AgentChatService(
         val ws = webSocket
         if (!isConnected || ws == null) {
             Log.w(tag, "send() called while not connected (isConnected=$isConnected, ws=${ws != null})")
-            scope.launch { _events.emit(ChatEvent.Error("Not connected")) }
+            emit(ChatEvent.Error("Not connected"))
             return
         }
         val frame =
@@ -147,7 +156,7 @@ class AgentChatService(
         val queued = ws.send(frame)
         if (!queued) {
             Log.w(tag, "WebSocket.send() returned false; frame not queued")
-            scope.launch { _events.emit(ChatEvent.Error("Failed to send (queue closed)")) }
+            emit(ChatEvent.Error("Failed to send (queue closed)"))
         }
     }
 
@@ -156,7 +165,7 @@ class AgentChatService(
     fun clear() {
         val ws = webSocket
         if (!isConnected || ws == null) {
-            scope.launch { _events.emit(ChatEvent.Error("Not connected")) }
+            emit(ChatEvent.Error("Not connected"))
             return
         }
         val frame =
@@ -169,7 +178,7 @@ class AgentChatService(
 
     private fun openSocket() {
         isConnecting = true
-        scope.launch { _events.emit(ChatEvent.Connecting) }
+        emit(ChatEvent.Connecting)
         Log.i(tag, "Connecting to agent chat: ${SafeUrl.redacted(wsUrl)}")
         val request = Request.Builder().url(wsUrl).build()
         webSocket = client.newWebSocket(request, listener)
@@ -182,7 +191,7 @@ class AgentChatService(
                 isConnected = true
                 isConnecting = false
                 reconnect.reset()
-                scope.launch { _events.emit(ChatEvent.Connected) }
+                emit(ChatEvent.Connected)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -193,7 +202,7 @@ class AgentChatService(
                 Log.e(tag, "Agent chat error: ${t.message}")
                 isConnected = false
                 isConnecting = false
-                scope.launch { _events.emit(ChatEvent.Error(t.message ?: "Connection failed")) }
+                emit(ChatEvent.Error(t.message ?: "Connection failed"))
                 scheduleReconnect()
             }
 
@@ -229,23 +238,23 @@ class AgentChatService(
                                 }
                             ChatMessage(role = mapped, content = content, ok = okEvent(m["events"]))
                         }
-                    scope.launch { _events.emit(ChatEvent.History(messages)) }
+                    emit(ChatEvent.History(messages))
                 }
                 ServerFrame.CHUNK -> {
                     val piece = obj["content"]?.jsonPrimitive?.content ?: return
-                    scope.launch { _events.emit(ChatEvent.Chunk(piece)) }
+                    emit(ChatEvent.Chunk(piece))
                 }
                 ServerFrame.OK -> {
                     val offer = parseOk(obj) ?: return
-                    scope.launch { _events.emit(ChatEvent.Ok(offer)) }
+                    emit(ChatEvent.Ok(offer))
                 }
                 ServerFrame.DONE -> {
-                    scope.launch { _events.emit(ChatEvent.Done) }
+                    emit(ChatEvent.Done)
                 }
                 ServerFrame.ERROR -> {
                     val message = obj["message"]?.jsonPrimitive?.content ?: "Unknown error"
                     Log.e(tag, "Server error frame: $message (raw=$text)")
-                    scope.launch { _events.emit(ChatEvent.Error(message)) }
+                    emit(ChatEvent.Error(message))
                 }
                 ServerFrame.PONG -> {}
                 else -> Log.d(tag, "Ignoring frame: $text")

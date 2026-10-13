@@ -206,10 +206,9 @@ class ChatViewModel(
                 _state.value = _state.value.copy(messages = msgs, streaming = true)
             }
             is ChatEvent.Ok -> {
-                // The OK belongs to this turn's reply. Frames are emitted on
-                // separate coroutines, so it may land after Done as well as
-                // before; either way it goes on the reply after the last
-                // user message, or on an empty one if the coach said nothing.
+                // The OK belongs to this turn's reply: it goes on the reply
+                // after the last user message, or on an empty one if the
+                // coach said nothing.
                 val msgs = _state.value.messages.toMutableList()
                 val lastUser = msgs.indexOfLast { it.role == ChatMessage.Role.USER }
                 val lastIdx = msgs.indexOfLast { it.role == ChatMessage.Role.ASSISTANT }
