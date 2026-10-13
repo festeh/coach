@@ -1,6 +1,8 @@
 package com.example.coach_android.ui.navigation
 
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -80,6 +82,14 @@ fun AppNavigation(
     val showTopBar = currentRoute == Screen.Apps.route
 
     Scaffold(
+        // Chat's header runs under the status bar and pads itself, so the bar
+        // takes the header's color rather than a band of the background.
+        contentWindowInsets =
+            if (currentRoute == Screen.Chat.route) {
+                ScaffoldDefaults.contentWindowInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+            } else {
+                ScaffoldDefaults.contentWindowInsets
+            },
         topBar = {
             if (showTopBar) {
                 TopAppBar(
@@ -178,7 +188,6 @@ fun AppNavigation(
                 }
                 ChatScreen(
                     viewModel = chatViewModel,
-                    embedded = true,
                     blockedApp = blockedApp,
                     onReturnToApp = onReturnToApp,
                 )

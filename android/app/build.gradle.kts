@@ -76,6 +76,10 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
+    // The coach writes Markdown. 0.32 is the last release built for Compose 1.7
+    // and Kotlin 2.1.10, which this BOM and plugin pin.
+    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.32.0")
+
     // Activity Compose
     implementation("androidx.activity:activity-compose:1.10.0")
 

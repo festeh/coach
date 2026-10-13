@@ -4,5 +4,8 @@
          The Compose content replaces it once the Activity draws. -->
     <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">@drawable/launch_background</item>
+        <!-- Without it the pre-Material parent leaves Android drawing opaque black
+             behind the status and navigation bars, over the edge-to-edge UI. -->
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
     </style>
 </resources>
