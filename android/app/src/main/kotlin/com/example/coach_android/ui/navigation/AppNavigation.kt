@@ -1,5 +1,6 @@
 package com.example.coach_android.ui.navigation
 
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -150,7 +151,9 @@ fun AppNavigation(
         NavHost(
             navController = navController,
             startDestination = Screen.Apps.route,
-            modifier = Modifier.padding(innerPadding),
+            // Consumed, so the chat's imePadding() adds only the part of the
+            // keyboard the bars don't already cover, not a bar-high gap above it.
+            modifier = Modifier.padding(innerPadding).consumeWindowInsets(innerPadding),
         ) {
             composable(Screen.Apps.route) {
                 AppsScreen(
