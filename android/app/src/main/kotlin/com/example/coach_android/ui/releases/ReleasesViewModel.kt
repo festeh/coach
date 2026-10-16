@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.coach_android.FocusMonitorService
 import com.example.coach_android.data.coach.ReleaseDto
+import com.example.coach_android.util.TimeFormatter
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,7 +15,6 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
 
 // One release as the screen shows it: its local time, and a word for how the
 // lock came off.
@@ -103,8 +103,6 @@ fun releaseLabel(release: ReleaseDto): String =
         else -> release.kind
     }
 
-private val dayFormat = DateTimeFormatter.ofPattern("EEE, MMM d")
-
 // Newest-first rows folded into local days, in the order they came. A day cut
 // by a page boundary continues when the next page is appended. Rows with an
 // unreadable timestamp are left out rather than filed under a wrong day.
@@ -127,13 +125,7 @@ fun groupReleasesByDay(
         if (last?.date == date) {
             days[days.lastIndex] = last.copy(rows = last.rows + row)
         } else {
-            val label =
-                when (date) {
-                    today -> "Today"
-                    today.minusDays(1) -> "Yesterday"
-                    else -> date.format(dayFormat)
-                }
-            days += ReleaseDay(date, label, listOf(row))
+            days += ReleaseDay(date, TimeFormatter.dayLabel(date, today), listOf(row))
         }
     }
     return days

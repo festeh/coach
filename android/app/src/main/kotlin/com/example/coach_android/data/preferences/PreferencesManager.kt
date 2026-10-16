@@ -82,14 +82,14 @@ class PreferencesManager(
         prefs.edit().putString("appRules", jsonStr).apply()
     }
 
-    // --- Agent chat thread ---
+    // --- Agent chat ---
 
-    fun getOrCreateAgentChatThreadId(): String {
-        val existing = prefs.getString("agentChatThreadId", null)
-        if (existing != null) return existing
-        val fresh = java.util.UUID.randomUUID().toString()
-        prefs.edit().putString("agentChatThreadId", fresh).apply()
-        return fresh
+    // Messages said by then are hidden from this phone's chat (ms epoch); the
+    // coach's thread keeps them.
+    fun loadAgentChatClearedAt(): Long = prefs.getLong("agentChatClearedAt", 0L)
+
+    fun saveAgentChatClearedAt(epochMillis: Long) {
+        prefs.edit().putLong("agentChatClearedAt", epochMillis).apply()
     }
 
     // --- Unlock stats cache ---

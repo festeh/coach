@@ -32,7 +32,6 @@ class AppContainer(
     val agentChatService =
         AgentChatService(
             baseUrl = agentsUrl,
-            threadId = preferencesManager.getOrCreateAgentChatThreadId(),
             apiToken = apiToken,
         )
 

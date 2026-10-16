@@ -8,6 +8,7 @@ import com.example.coach_android.data.agentchat.AgentChatService
 import com.example.coach_android.data.agentchat.ChatEvent
 import com.example.coach_android.data.agentchat.ChatMessage
 import com.example.coach_android.data.agentchat.OkOffer
+import com.example.coach_android.data.preferences.PreferencesManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,6 +60,8 @@ class ChatViewModel(
 ) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
+
+    private val prefs = PreferencesManager(application)
 
     private var eventsJob: Job? = null
     private var focusJob: Job? = null
@@ -167,22 +170,34 @@ class ChatViewModel(
         }
     }
 
-    // The server wipes the thread and replies with an empty history frame,
-    // which reduce() folds into a cleared message list.
+    // Tidies this phone only: what was said so far stays out of view here,
+    // and the coach still remembers it. Not mid-reply, which would leave the
+    // reply's OK without the reason it answers.
     fun clear() {
-        chatService()?.clear()
+        if (_state.value.streaming) return
+        prefs.saveAgentChatClearedAt(Instant.now().toEpochMilli())
+        okExpiryJob?.cancel()
+        _state.value = _state.value.copy(messages = visible(_state.value.messages), pendingOk = null)
+    }
+
+    // What this phone shows: everything said after its last clear, and any
+    // row without a readable stamp.
+    private fun visible(messages: List<ChatMessage>): List<ChatMessage> {
+        val clearedAt = prefs.loadAgentChatClearedAt()
+        return messages.filter { it.at == null || it.at.toEpochMilli() > clearedAt }
     }
 
     private fun reduce(event: ChatEvent) {
         when (event) {
             is ChatEvent.History -> {
+                val messages = visible(event.messages)
                 _state.value =
                     _state.value.copy(
-                        messages = event.messages,
+                        messages = messages,
                         connecting = false,
                         error = null,
                     )
-                showOk(latestOk(event.messages))
+                showOk(latestOk(messages))
             }
             is ChatEvent.Connecting -> {
                 _state.value = _state.value.copy(connecting = true)
@@ -223,8 +238,10 @@ class ChatViewModel(
             is ChatEvent.Done -> {
                 val msgs = _state.value.messages.toMutableList()
                 val lastIdx = msgs.indexOfLast { it.role == ChatMessage.Role.ASSISTANT }
+                // The reply was said when it finished, not when the bubble for
+                // it went up.
                 if (lastIdx >= 0 && msgs[lastIdx].streaming) {
-                    msgs[lastIdx] = msgs[lastIdx].copy(streaming = false)
+                    msgs[lastIdx] = msgs[lastIdx].copy(streaming = false, at = Instant.now())
                 }
                 _state.value = _state.value.copy(messages = msgs, streaming = false)
                 showOk(latestOk(msgs))

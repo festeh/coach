@@ -15,19 +15,19 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import java.time.Instant
 import java.time.OffsetDateTime
 
 // Frame kinds on the chat socket — mirror my-agents' WsIn/WsOut enums.
 private object ClientFrame {
     const val MESSAGE = "message"
-    const val CLEAR = "clear"
 }
 
 private object ServerFrame {
@@ -46,7 +46,7 @@ private object HistoryRole {
 
 /**
  * WebSocket client to the my-agents server's coach agent at
- * `<baseUrl>/api/coach/ws/<threadId>`.
+ * `<baseUrl>/api/coach/ws/<THREAD_ID>`.
  *
  * One instance is constructed by AppContainer. The chat Activity connects
  * when foregrounded (`connect()`) and disconnects when backgrounded
@@ -55,7 +55,6 @@ private object HistoryRole {
  */
 class AgentChatService(
     baseUrl: String,
-    private val threadId: String,
     apiToken: String = "",
 ) {
     private val tag = "AgentChatService"
@@ -80,7 +79,7 @@ class AgentChatService(
                     .removePrefix("ws://")
             // Token in the query, matching the browser clients — Caddy checks it.
             val auth = if (apiToken.isEmpty()) "" else "?token=$apiToken"
-            "$scheme$withoutScheme/api/coach/ws/$threadId$auth"
+            "$scheme$withoutScheme/api/coach/ws/$THREAD_ID$auth"
         }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -160,22 +159,6 @@ class AgentChatService(
         }
     }
 
-    // Ask the server to wipe this thread. It answers with an empty history
-    // frame, which resets the UI the same way a fresh connect would.
-    fun clear() {
-        val ws = webSocket
-        if (!isConnected || ws == null) {
-            emit(ChatEvent.Error("Not connected"))
-            return
-        }
-        val frame =
-            json.encodeToString(
-                JsonObject.serializer(),
-                buildJsonObject { put("type", JsonPrimitive(ClientFrame.CLEAR)) },
-            )
-        ws.send(frame)
-    }
-
     private fun openSocket() {
         isConnecting = true
         emit(ChatEvent.Connecting)
@@ -236,7 +219,12 @@ class AgentChatService(
                                     HistoryRole.AI -> ChatMessage.Role.ASSISTANT
                                     else -> return@mapNotNull null
                                 }
-                            ChatMessage(role = mapped, content = content, ok = okEvent(m["events"]))
+                            ChatMessage(
+                                role = mapped,
+                                content = content,
+                                at = parseInstant(m["at"]),
+                                ok = okEvent(m["events"]),
+                            )
                         }
                     emit(ChatEvent.History(messages))
                 }
@@ -272,16 +260,22 @@ class AgentChatService(
             ?.firstOrNull { it["type"]?.jsonPrimitive?.content == ServerFrame.OK }
             ?.let(::parseOk)
 
-    private fun parseOk(obj: JsonObject): OkOffer? =
-        try {
-            OkOffer(
-                minutes = obj["minutes"]!!.jsonPrimitive.int,
-                // OffsetDateTime takes both "Z" and "+00:00"; Instant.parse
-                // on older runtimes only takes the former.
-                at = OffsetDateTime.parse(obj["at"]!!.jsonPrimitive.content).toInstant(),
-            )
-        } catch (e: Exception) {
+    private fun parseOk(obj: JsonObject): OkOffer? {
+        val minutes = (obj["minutes"] as? JsonPrimitive)?.intOrNull
+        val at = parseInstant(obj["at"])
+        if (minutes == null || at == null) {
             Log.w(tag, "Ignoring malformed ok event: $obj")
+            return null
+        }
+        return OkOffer(minutes = minutes, at = at)
+    }
+
+    // OffsetDateTime takes both "Z" and "+00:00"; Instant.parse on older
+    // runtimes only takes the former.
+    private fun parseInstant(value: JsonElement?): Instant? =
+        try {
+            OffsetDateTime.parse((value as JsonPrimitive).content).toInstant()
+        } catch (e: Exception) {
             null
         }
 
@@ -302,5 +296,9 @@ class AgentChatService(
 
     companion object {
         private const val BASE_RECONNECT_DELAY_MS = 1500L
+
+        // Every device talks in this one thread, so the coach hears the phone
+        // and the browser alike. The server keeps the last 30 days of it.
+        const val THREAD_ID = "main"
     }
 }

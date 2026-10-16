@@ -2,6 +2,8 @@
 // cursor to the next older page. Each row is one time the lock came off (or,
 // in older rows, a peek, an override or a judge's denial).
 
+import { dayKey, dayLabel } from "./format";
+
 export interface Release {
   id: number;
   kind: string; // "grant"; older rows: "override", "short_unblock", "denial"
@@ -60,30 +62,16 @@ export interface ReleaseDay {
   releases: Release[];
 }
 
-function dayKey(date: Date): string {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
-}
-
 // Newest-first rows folded into local days, in the order they came. A day cut
 // by a page boundary continues when the next page is appended.
 export function groupByDay(releases: Release[], now: Date): ReleaseDay[] {
-  const today = dayKey(now);
-  const yesterday = dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
   const days: ReleaseDay[] = [];
   for (const release of releases) {
     const at = new Date(release.created);
     const key = dayKey(at);
     let day = days[days.length - 1];
     if (day?.key !== key) {
-      const label =
-        key === today
-          ? "Today"
-          : key === yesterday
-            ? "Yesterday"
-            : at.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
-      day = { key, label, releases: [] };
+      day = { key, label: dayLabel(at, now), releases: [] };
       days.push(day);
     }
     day.releases.push(release);

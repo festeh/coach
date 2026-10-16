@@ -16,8 +16,15 @@ export interface ChatMessage {
   // answer) — never sent, never part of the agent thread.
   role: "human" | "ai" | "error" | "notice";
   content: string;
+  // When it was said, ms epoch: the server's stamp for history, this page's
+  // clock for what happens while it is open.
+  at: number;
   offer?: Offer;
 }
+
+// Every device talks in this one thread, so the coach hears the phone and the
+// browser alike. The server keeps the last 30 days of it.
+export const CHAT_THREAD_ID = "main";
 
 // An OK reaches the user only while it is fresh: an old one in the history
 // must not open the lock without a new reason.
@@ -27,8 +34,7 @@ export const FALLBACK_MINUTES = 10;
 
 // Frame kinds on the chat socket — mirror my-agents' WsIn/WsOut enums.
 export const ClientFrameType = {
-  Message: "message",
-  Clear: "clear"
+  Message: "message"
 } as const;
 
 export const ServerFrameType = {
@@ -56,6 +62,7 @@ export interface OkEvent {
 export interface HistoryEntry {
   role: string;
   content: string;
+  at: string;
   events?: { type: string }[];
 }
 
@@ -86,16 +93,19 @@ export function fallbackOffer(now: number): Offer {
 }
 
 // Tool and system rows are the coach's internals, not dialogue; an AI row
-// keeps the OK its turn offered.
-export function historyMessages(entries: HistoryEntry[]): ChatMessage[] {
+// keeps the OK its turn offered. Clearing the chat only hides it on this
+// device: rows said by `clearedAt` stay out of view, the thread keeps them.
+export function historyMessages(entries: HistoryEntry[], clearedAt = 0): ChatMessage[] {
   return entries
     .filter((m) => m.role === "human" || m.role === "ai")
     .map((m) => {
-      const message: ChatMessage = { role: m.role as "human" | "ai", content: m.content };
+      const message: ChatMessage = { role: m.role as "human" | "ai", content: m.content, at: Date.parse(m.at) };
       const offer = m.events?.map(offerOf).find((o) => o !== undefined);
       if (offer) message.offer = offer;
       return message;
-    });
+    })
+    // Written this way round so a row without a readable stamp stays in view.
+    .filter((m) => !(m.at <= clearedAt));
 }
 
 // The OK on show, if any: only the conversation's last message carries one,
@@ -131,10 +141,10 @@ export function releaseFor(messages: ChatMessage[], index: number): ReleaseMessa
 // Build the chat socket URL the way Android does: https→wss, http→ws,
 // pass ws(s) through untouched. The token rides the query string — the
 // browser WebSocket API can't set headers.
-export function chatWsUrl(baseUrl: string, threadId: string, token = ""): string {
+export function chatWsUrl(baseUrl: string, token = ""): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, "");
   const withoutScheme = trimmed.replace(/^(https?|wss?):\/\//, "");
   const scheme = trimmed.startsWith("http://") || trimmed.startsWith("ws://") ? "ws://" : "wss://";
-  const url = `${scheme}${withoutScheme}/api/coach/ws/${threadId}`;
+  const url = `${scheme}${withoutScheme}/api/coach/ws/${CHAT_THREAD_ID}`;
   return token ? `${url}?token=${token}` : url;
 }

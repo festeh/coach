@@ -4,9 +4,9 @@
 	import { blockedTargetOf } from '../../lib/blocking';
 	import { CoachState } from '../../lib/coachState.svelte';
 	import { ChatClient } from '../../lib/chat/client.svelte';
-	import { chatWsUrl, liveOfferIndex, releaseFor } from '../../lib/chat/protocol';
-	import { getOrCreateThreadId } from '../../lib/chat/thread';
-	import { formatTime } from '../../lib/format';
+	import { chatWsUrl, liveOfferIndex, releaseFor, type ChatMessage } from '../../lib/chat/protocol';
+	import { clockTime, dayKey, dayLabel, formatTime } from '../../lib/format';
+	import { getStorage, setStorage } from '../../lib/storage';
 
 	const agentsUrl = import.meta.env.VITE_AGENTS as string;
 	const coachToken = (import.meta.env.VITE_COACH_TOKEN as string | undefined) ?? '';
@@ -26,13 +26,22 @@
 	);
 
 	onMount(async () => {
-		const threadId = await getOrCreateThreadId();
+		const { chat_cleared_at } = await getStorage('chat_cleared_at');
 		client = new ChatClient(
-			chatWsUrl(agentsUrl, threadId, coachToken),
-			blocked ? { blocked: blocked.host } : undefined
+			chatWsUrl(agentsUrl, coachToken),
+			blocked ? { blocked: blocked.host } : undefined,
+			chat_cleared_at
 		);
 		client.connect();
 	});
+
+	// A day label goes above the first message of each day.
+	function startsDay(messages: ChatMessage[], index: number): boolean {
+		const at = messages[index].at;
+		if (!Number.isFinite(at)) return false;
+		const previous = messages[index - 1]?.at;
+		return previous === undefined || dayKey(new Date(at)) !== dayKey(new Date(previous));
+	}
 
 	onMount(() => {
 		const tick = setInterval(() => (now = Date.now()), 10_000);
@@ -83,10 +92,13 @@
 		return `Released — ${formatTime(coach.agentReleaseTimeLeft)} left`;
 	}
 
+	// Tidies this browser only: the coach still remembers the last 30 days.
 	function clearChat(): void {
-		if (confirm('Clear this conversation? The coach forgets this thread; the ledger keeps its rows.')) {
-			client?.clear();
-		}
+		if (!client || client.awaitingReply) return;
+		if (!confirm('Clear the chat in this browser? The coach still remembers it.')) return;
+		const now = Date.now();
+		client.clear(now);
+		setStorage({ chat_cleared_at: now });
 	}
 </script>
 
@@ -101,7 +113,7 @@
 			type="button"
 			class="p-1.5 rounded-lg transition-colors disabled:opacity-40"
 			style:color="var(--color-ink-subtle)"
-			disabled={!client || client.status !== 'open'}
+			disabled={!client || client.messages.length === 0 || client.awaitingReply}
 			onclick={clearChat}
 			title="Clear conversation"
 			aria-label="Clear conversation"
@@ -131,6 +143,11 @@
 			{/if}
 
 			{#each client.messages as message, index}
+				{#if startsDay(client.messages, index)}
+					<p class="text-xs text-center pt-1" style:color="var(--color-ink-subtle)">
+						{dayLabel(new Date(message.at), new Date(now))}
+					</p>
+				{/if}
 				{#if message.role === 'error'}
 					<p class="text-xs text-center" style:color="var(--color-bad)">{message.content}</p>
 				{:else if message.role === 'notice'}
@@ -146,6 +163,11 @@
 							: 'var(--color-surface-2)'}
 					>
 						{message.content}
+						{#if Number.isFinite(message.at)}
+							<span class="block mt-1 text-right text-[10px]" style:color="var(--color-ink-subtle)">
+								{clockTime(message.at)}
+							</span>
+						{/if}
 					</div>
 				{/if}
 				{#if index === offerIndex && message.offer}

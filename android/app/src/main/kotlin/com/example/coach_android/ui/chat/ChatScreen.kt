@@ -90,6 +90,9 @@ import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.markdownAnimations
 import com.mikepenz.markdown.model.markdownPadding
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
 @Composable
 fun ChatScreen(
@@ -149,8 +152,8 @@ fun ChatScreen(
     if (confirmClear) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
-            title = { Text("Clear conversation?") },
-            text = { Text("The coach forgets this thread. The decision ledger keeps its rows.") },
+            title = { Text("Clear the chat?") },
+            text = { Text("It goes from this phone only. The coach still remembers it.") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -225,7 +228,13 @@ fun ChatScreen(
                         // the item away and lost the scroll anchor each time.
                         items(count = state.messages.size) { idx ->
                             val message = state.messages[idx]
+                            val zone = ZoneId.systemDefault()
+                            val day = message.at?.atZone(zone)?.toLocalDate()
+                            val previousDay = state.messages.getOrNull(idx - 1)?.at?.atZone(zone)?.toLocalDate()
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (day != null && (idx == 0 || day != previousDay)) {
+                                    DayLabel(TimeFormatter.dayLabel(day, LocalDate.now(zone)))
+                                }
                                 MessageBubble(message = message)
                                 state.pendingOk
                                     ?.takeIf { it.messageIndex == idx }
@@ -446,35 +455,79 @@ private fun MessageBubble(message: ChatMessage) {
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
             )
-        ChatMessage.Role.USER -> UserBubble(message.content)
+        ChatMessage.Role.USER -> UserBubble(message.content, message.at)
         ChatMessage.Role.ASSISTANT ->
             if (message.content.isEmpty() && message.streaming) {
                 TypingIndicator(modifier = Modifier.padding(vertical = 6.dp))
             } else {
-                CoachReply(message.content)
+                Column {
+                    CoachReply(message.content)
+                    // A reply still streaming has no time yet: it is said when it ends.
+                    if (!message.streaming) message.at?.let { MessageTime(it) }
+                }
             }
     }
+}
+
+// Above the first message of each day.
+@Composable
+private fun DayLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+    )
+}
+
+@Composable
+private fun MessageTime(
+    at: Instant,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    Text(
+        text = TimeFormatter.clockTime(at, ZoneId.systemDefault()),
+        style = MaterialTheme.typography.labelSmall,
+        color = color,
+        modifier = modifier,
+    )
 }
 
 // The user's lines keep a bubble; the coach's replies run full width, which
 // reads better for its longer, multi-paragraph answers.
 @Composable
-private fun UserBubble(text: String) {
+private fun UserBubble(
+    text: String,
+    at: Instant?,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 48.dp),
         horizontalArrangement = Arrangement.End,
     ) {
-        SelectionContainer {
-            Text(
-                text = text,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier =
-                    Modifier
-                        .clip(RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-            )
+        Column(
+            horizontalAlignment = Alignment.End,
+            modifier =
+                Modifier
+                    .clip(RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
+        ) {
+            SelectionContainer {
+                Text(
+                    text = text,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            at?.let {
+                MessageTime(
+                    at = it,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
     }
 }

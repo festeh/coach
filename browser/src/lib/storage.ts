@@ -4,7 +4,8 @@ export interface StorageSchema {
   connected: boolean;
   reconnect_at: number;
   agent_release_time_left: number | null;
-  chat_thread_id: string;
+  // Messages said by then are hidden from this browser's chat (ms epoch).
+  chat_cleared_at: number;
   last_reload_stamp: string;
 }
 
@@ -18,7 +19,7 @@ const DEFAULTS: StorageSchema = {
   connected: false,
   reconnect_at: 0,
   agent_release_time_left: null,
-  chat_thread_id: '',
+  chat_cleared_at: 0,
   last_reload_stamp: '',
 };
 

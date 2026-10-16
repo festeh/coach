@@ -22,7 +22,12 @@ export class ChatClient {
 
   private ws: WebSocket | null = null;
 
-  constructor(private url: string, private context?: MessageContext) {}
+  constructor(
+    private url: string,
+    private context?: MessageContext,
+    // Messages said by then stay hidden: clearing only tidies this page.
+    private clearedAt = 0
+  ) {}
 
   connect(): void {
     this.disconnect();
@@ -61,7 +66,7 @@ export class ChatClient {
   send(content: string): void {
     const trimmed = content.trim();
     if (!trimmed || this.status === "connecting" || this.awaitingReply) return;
-    this.messages = [...this.messages, { role: "human", content: trimmed }];
+    this.messages = [...this.messages, { role: "human", content: trimmed, at: Date.now() }];
     if (this.status !== "open") {
       this.offerFallback();
       return;
@@ -70,24 +75,23 @@ export class ChatClient {
     this.ws!.send(JSON.stringify({ type: ClientFrameType.Message, content: trimmed, context: this.context }));
   }
 
-  // Wipe the thread server-side; the empty history frame that comes back
-  // resets this state the same way a fresh connect would.
-  clear(): void {
-    if (this.status !== "open") return;
-    this.streamText = "";
-    this.awaitingReply = false;
-    this.ws!.send(JSON.stringify({ type: ClientFrameType.Clear }));
+  // Hide everything said so far from this page; the coach's thread keeps it.
+  // Not mid-reply, which would leave the reply's OK without its reason.
+  clear(now = Date.now()): void {
+    if (this.awaitingReply) return;
+    this.clearedAt = now;
+    this.messages = [];
   }
 
   // A clicked OK is spent: the page stops showing it.
   takeOffer(index: number): void {
-    this.messages = this.messages.map((m, i) => (i === index ? { role: m.role, content: m.content } : m));
+    this.messages = this.messages.map((m, i) => (i === index ? { role: m.role, content: m.content, at: m.at } : m));
   }
 
   private handleFrame(frame: ServerFrame): void {
     switch (frame.type) {
       case ServerFrameType.History:
-        this.messages = historyMessages(frame.messages);
+        this.messages = historyMessages(frame.messages, this.clearedAt);
         break;
       case ServerFrameType.Chunk:
         this.streamText += frame.content;
@@ -101,7 +105,7 @@ export class ChatClient {
         this.messages =
           last?.role === "ai"
             ? [...this.messages.slice(0, -1), { ...last, offer }]
-            : [...this.messages, { role: "ai", content: "", offer }];
+            : [...this.messages, { role: "ai", content: "", at: Date.now(), offer }];
         break;
       }
       case ServerFrameType.Done:
@@ -110,7 +114,7 @@ export class ChatClient {
         break;
       case ServerFrameType.Error:
         this.foldStream();
-        this.messages = [...this.messages, { role: "error", content: frame.message }];
+        this.messages = [...this.messages, { role: "error", content: frame.message, at: Date.now() }];
         if (this.awaitingReply) this.offerFallback();
         this.awaitingReply = false;
         break;
@@ -118,14 +122,15 @@ export class ChatClient {
   }
 
   private offerFallback(): void {
-    this.messages = [...this.messages, { role: "notice", content: FALLBACK_NOTICE, offer: fallbackOffer(Date.now()) }];
+    const now = Date.now();
+    this.messages = [...this.messages, { role: "notice", content: FALLBACK_NOTICE, at: now, offer: fallbackOffer(now) }];
   }
 
   // Move whatever has streamed so far into the message list, so a close or
   // error mid-turn never loses text.
   private foldStream(): void {
     if (this.streamText) {
-      this.messages = [...this.messages, { role: "ai", content: this.streamText }];
+      this.messages = [...this.messages, { role: "ai", content: this.streamText, at: Date.now() }];
       this.streamText = "";
     }
   }

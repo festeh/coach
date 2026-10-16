@@ -1,6 +1,14 @@
 package com.example.coach_android.util
 
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
 object TimeFormatter {
+    private val dayFormat = DateTimeFormatter.ofPattern("EEE, MMM d")
+    private val clockFormat = DateTimeFormatter.ofPattern("HH:mm")
+
     fun formatFocusTime(totalSeconds: Int): String {
         val days = totalSeconds / 86400
         val hours = (totalSeconds % 86400) / 3600
@@ -14,6 +22,22 @@ object TimeFormatter {
             else -> "${seconds}s"
         }
     }
+
+    // "Today", "Yesterday", or a short date like "Mon, Oct 12".
+    fun dayLabel(
+        date: LocalDate,
+        today: LocalDate,
+    ): String =
+        when (date) {
+            today -> "Today"
+            today.minusDays(1) -> "Yesterday"
+            else -> date.format(dayFormat)
+        }
+
+    fun clockTime(
+        at: Instant,
+        zone: ZoneId,
+    ): String = at.atZone(zone).format(clockFormat)
 
     fun todayString(): String {
         val now = java.time.LocalDate.now()

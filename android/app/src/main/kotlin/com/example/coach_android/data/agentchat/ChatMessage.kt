@@ -5,6 +5,10 @@ import java.time.Instant
 data class ChatMessage(
     val role: Role,
     val content: String,
+    // When it was said: the server's stamp for history, the phone's clock for
+    // what happens while the chat is open. Null for a history row without a
+    // readable stamp.
+    val at: Instant? = Instant.now(),
     val streaming: Boolean = false,
     // The coach's OK on this reply: how long it lets the user in, and when it
     // was offered. Only the latest reply's OK is ever shown, and only briefly.
