@@ -18,6 +18,8 @@ html, body {
 	margin: 0;
 	width: 400px;
 	background: var(--color-surface);
+	color-scheme: dark;
+	scrollbar-color: var(--color-ink-subtle) transparent;
 	color: var(--color-ink);
 	font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
 	-webkit-font-smoothing: antialiased;

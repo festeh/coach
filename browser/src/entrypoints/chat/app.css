@@ -21,6 +21,8 @@ html, body {
 	   composer pinned to the bottom of the window at any browser zoom. */
 	overflow: hidden;
 	background: var(--color-surface);
+	color-scheme: dark;
+	scrollbar-color: var(--color-ink-subtle) transparent;
 	color: var(--color-ink);
 	font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
 	-webkit-font-smoothing: antialiased;
